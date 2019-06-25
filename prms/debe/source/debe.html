@@ -1,0 +1,3694 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <title>The source code</title>
+  <link href="../resources/prettify/prettify.css" type="text/css" rel="stylesheet" />
+  <script type="text/javascript" src="../resources/prettify/prettify.js"></script>
+  <style type="text/css">
+    .highlight { display: block; background-color: #ddd; }
+  </style>
+  <script type="text/javascript">
+    function highlight() {
+      document.getElementById(location.hash.replace(/#/, "")).className = "highlight";
+    }
+  </script>
+</head>
+<body onload="prettyPrint(); highlight();">
+  <pre class="prettyprint lang-js">&quot;use strict&quot;;
+
+// UNCLASSIFIED 
+<span id='DEBE'>/**
+</span>@class DEBE
+@requires child_process
+@requires cluster
+@requires child-process
+@requires fs
+@requires stream
+@requires os
+
+@requires i18n-abide
+@requires socket.io
+@requires socket.io-clusterhub
+@requires jade
+@requires jade-filters
+@requires optimist
+@requires tokml
+@requires mathjax-node
+
+@requires flex
+@requires totem
+@requires atomic
+@requires geohack
+@requires $
+@requires randpr
+
+@requires strdif
+@requires string-similarity
+
+Required env vars: none
+
+Required openv.datasets:
+	profiles, viewers, apps
+	
+Required app.datasets:
+	voxels, files, events, queues, engines, dblogs, quizes
+	
+*/
+
+var
+// globals
+ENV = process.env,
+    TRACE = &quot;D&gt;&quot;,
+    WINDOWS = process.platform == 'win32',
+    //&lt; Is Windows platform
+
+// NodeJS modules
+CP = require(&quot;child_process&quot;),
+    //&lt; Child process threads
+CLUSTER = require(&quot;cluster&quot;),
+    //&lt; Support for multiple cores
+STREAM = require(&quot;stream&quot;),
+    //&lt; pipe streaming
+FS = require(&quot;fs&quot;),
+    //&lt; filesystem and uploads
+OS = require(&quot;os&quot;),
+    //&lt; system utilizations for watch dogs
+URL = require(&quot;url&quot;),
+    //&lt; data fetcher url parser
+
+// 3rd party modules
+ODOC = require(&quot;officegen&quot;),
+    //&lt; office doc generator
+LANG = require('i18n-abide'),
+    //&lt; I18 language translator
+ARGP = require('optimist'),
+    //&lt; Command line argument processor
+TOKML = require(&quot;tokml&quot;),
+    //&lt; geojson to kml convertor
+JAX = require(&quot;mathjax-node&quot;),
+    //&lt; servde side mathjax parser
+JADE = require('jade'),
+    //&lt; using jade as the skinner
+
+// totem modules		
+ATOM = require(&quot;atomic&quot;),
+    FLEX = require(&quot;flex&quot;),
+    TOTEM = require(&quot;totem&quot;),
+    $ = require(&quot;man&quot;),
+    RAN = require(&quot;randpr&quot;),
+    HACK = require(&quot;geohack&quot;);
+
+var _require = require(&quot;enum&quot;),
+    Copy = _require.Copy,
+    Each = _require.Each,
+    Log = _require.Log,
+    isString = _require.isString,
+    isFunction = _require.isFunction,
+    isError = _require.isError,
+    isArray = _require.isArray;
+
+var // shortcuts and globals
+Thread = TOTEM.thread;
+
+var DEBE = module.exports = Copy({
+
+	reroute: { //&lt; sql.acces routes to provide secure access to db
+		engines: function engines(ctx) {
+			// protect engines that are not registered to requesting client
+			//Log(&quot;&lt;&lt;&lt;&quot;, ctx);
+			ctx.index[&quot;Nrel:&quot;] = &quot;count(releases._License)&quot;;
+			ctx.index[ctx.from + &quot;.*:&quot;] = &quot;&quot;;
+			ctx.join = &quot;LEFT JOIN &quot; + ctx.db + &quot;.releases ON (releases._Product = concat(engines.name,'.',engines.type)) AND releases._Partner='&quot; + ctx.client + &quot;'&quot;;
+			ctx.where[&quot;releases.id:&quot;] = &quot;&quot;;
+			//Log(&quot;&gt;&gt;&gt;&quot;, ctx);
+			return ctx.db + &quot;.&quot; + ctx.from;
+		},
+
+		syslogs: &quot;openv.syslogs&quot;,
+		masters: &quot;block.masters&quot;,
+		roles: &quot;openv.roles&quot;,
+		aspreqts: &quot;openv.aspreqts&quot;,
+		ispreqts: &quot;openv.ispreqts&quot;,
+		swreqts: &quot;openv.swreqts&quot;,
+		hwreqts: &quot;openv.hwreqts&quot;,
+		tta: &quot;openv.tta&quot;,
+		trades: &quot;openv.trades&quot;,
+		milestones: &quot;openv.milestones&quot;,
+		sessions: &quot;openv.sessions&quot;,
+		journal: &quot;openv.journal&quot;,
+		hawks: &quot;openv.hawks&quot;,
+		attrs: &quot;openv.attrs&quot;,
+		issues: &quot;openv.issues&quot;
+	},
+
+	blog: {
+		digits: 2, // precision to show
+		&quot;:&quot;: function _(lhs, rhs, ctx) {
+			return ctx.toEqn(&quot;&quot;, lhs, rhs, ctx);
+		}, // inline TeX
+		&quot;|&quot;: function _(lhs, rhs, ctx) {
+			return ctx.toEqn(&quot;a&quot;, lhs, rhs, ctx);
+		}, // Ascii Match
+		&quot;;&quot;: function _(lhs, rhs, ctx) {
+			return ctx.toEqn(&quot;n&quot;, lhs, rhs, ctx);
+		}, // break TeX
+		&quot;&gt;&quot;: function _(lhs, rhs, ctx) {
+			return ctx.toTag(lhs, rhs, ctx);
+		}, // [post](url) 
+		&quot;&lt;&quot;: function _(lhs, rhs, ctx) {
+			// add context value or generator
+
+			if (rhs.split(&quot;,&quot;).length &gt; 1) eval(&quot;\ntry {\n\tctx[lhs] = (lhs,rhs,ctx) =&gt; ctx.toTag( &quot; + rhs + &quot; );\n}\ncatch (err) {\n} &quot;);else ctx[lhs] = rhs.parseJS(ctx);
+
+			return &quot;&quot;;
+		},
+
+		toEqn: function toEqn(pre, lhs, rhs, ctx) {
+
+			function toTeX(val) {
+				var digits = ctx.digits;
+
+				if (val) switch (val.constructor.name) {
+					case &quot;Number&quot;:
+						return val.toFixed(digits);
+
+					case &quot;String&quot;:
+						return val;
+
+					case &quot;Array&quot;:
+						var tex = [];
+						val.forEach(function (rec) {
+							if (rec) {
+								if (rec.forEach) {
+									rec.forEach(function (val, idx) {
+										rec[idx] = toTeX(val);
+									});
+									tex.push(rec.join(&quot; &amp; &quot;));
+								} else tex.push(toTeX(rec));
+							} else tex.push(rec == 0 ? &quot;0&quot; : &quot;\\emptyset&quot;);
+						});
+						return &quot;\\left[ \\begin{matrix} &quot; + tex.join(&quot;\\\\&quot;) + &quot; \\end{matrix} \\right]&quot;;
+
+					case &quot;Date&quot;:
+						return val + &quot;&quot;;
+
+					case &quot;Object&quot;:
+						var rtns = [];
+						for (var key in val) {
+							rtns.push(&quot;{&quot; + toTeX(val[key]) + &quot;}_{&quot; + key + &quot;}&quot;);
+						}return rtns.join(&quot; , &quot;);
+
+					default:
+						return JSON.stringify(val);
+				} else return val == 0 ? &quot;0&quot; : &quot;\\emptyset&quot;;
+			}
+
+			function toDoc(arg) {
+				return arg.startsWith(&quot;#&quot;) ? (&quot;${doc(&quot; + arg.substr(1) + &quot;)}&quot;).parseJS(ctx).parseJSON() || &quot;?&quot; : arg;
+			}
+
+			return pre + &quot;$$&quot; + toTeX(lhs.parseJSON(toDoc) || &quot;&quot;) + &quot; = &quot; + toTeX(rhs.parseJSON(toDoc) || &quot;&quot;) + &quot; $$&quot;;
+		},
+
+		toTag: function toTag(lhs, rhs, ctx) {
+			var lKeys = lhs.split(&quot;,&quot;),
+			    rKeys = rhs.split(&quot;,&quot;),
+			    base = lKeys[0] + &quot;$.&quot;,
+			    skin = rKeys[0],
+			    args = (rKeys[3] || &quot;&quot;).replace(/;/g, &quot;,&quot;),
+			    opts = {
+				w: rKeys[1],
+				h: rKeys[2],
+				x: lKeys[1] ? base + lKeys[1] : &quot;&quot;,
+				y: lKeys[2] ? base + lKeys[2] : &quot;&quot;,
+				r: lKeys[3] ? base + lKeys[3] : &quot;&quot;
+			};
+
+			for (var key in opts) {
+				if (!opts[key]) delete opts[key];
+			} //Log( base, view, &quot;[post](/&quot; + (skin+&quot;.view&quot;).tag(&quot;?&quot;,opts)+args + &quot;)&quot; );
+			return &quot;[post](/&quot; + (skin + &quot;.view&quot;).tag(&quot;?&quot;, opts) + args + &quot;)&quot;;
+		}
+	},
+
+	init: Initialize,
+
+	//plugins: $.libs,
+
+	ingester: function ingester(opts, query, cb) {
+		function ingestEvents(data, cb) {
+			var evs = [];
+			if (recs = opts.get ? data[opts.get] : data) {
+				Log(&quot;ingest recs&quot;, recs.length);
+				recs.forEach(function (rec, idx) {
+					if (ev = opts.ev) {
+						if (isString(ev)) {
+							var ctx = VM.createContext({ rec: rec, query: query, evs: evs }),
+							    reader = &quot;evs.push( (&quot; + opts.ev + &quot;)(rec, evs.length) );&quot;;
+
+							VM.runInContext(reader, ctx);
+						} else evs.push(ev(rec, evs.length));
+					} else evs.push(rec);
+				});
+			}
+			cb(evs);
+		}
+
+		var fetcher = DEBE.fetcher;
+
+		try {
+			if (url = opts.url) switch (url.constructor) {
+				case String:
+					fetcher(url.tag(&quot;?&quot;, query), opts.put, function (data) {
+						if (data = data.parseJSON()) ingestEvents(data, cb);
+					});
+					break;
+
+				case Function:
+					url(function (data) {
+						ingestEvents(data, cb);
+					});
+					break;
+
+				default:
+					ingestEvents(url, cb);
+			}
+		} catch (err) {
+			Log(&quot;INGESTER&quot;, err);
+		}
+	},
+
+	onIngest: require(&quot;./ingesters&quot;),
+
+	onStartup: function onStartup(sql) {
+		var site = DEBE.site,
+		    pocs = site.pocs,
+		    sendMail = FLEX.sendMail;
+
+		if (pocs.admin) sendMail({
+			to: pocs.admin,
+			subject: site.title + &quot; started&quot;,
+			body: &quot;Just FYI&quot;
+		});
+
+		sql.query(&quot;SELECT File FROM openv.watches WHERE substr(File,1,1) = '/' GROUP BY File&quot;, []).on(&quot;result&quot;, function (link) {
+			dogAutoruns(link.File);
+		});
+	},
+
+	onUpdate: function onUpdate(sql, ds, body) {
+		// update change journal 
+		sql.hawk({ Dataset: ds, Field: &quot;&quot; }); // journal entry for the record itself
+		if (false) // journal entry for each record key being changed
+			for (var key in body) {
+				sql.hawk({ Dataset: ds, Field: key });
+				sql.hawk({ Dataset: &quot;&quot;, Field: key });
+			}
+	},
+
+	// watchdog configuration
+
+	dogs: { //&lt; watch dogs cycle time in secs (zero to disable)
+		dogCatalog: Copy({
+			//cycle: 1000
+		}, function dogCatalog(dog) {}),
+
+		dogDetectors: Copy({
+			//cycle: 400
+		}, function dogDetectors(dog) {}),
+
+		dogReleases: Copy({
+			cycle: 400,
+			get: {
+				unworthy: &quot;SELECT ID,_Product,_EndServiceID FROM app.releases WHERE _Fails &gt; ? GROUP BY _Product,_EndServiceID&quot;
+			},
+			maxFails: 10
+		}, function dogReleases(dog) {
+
+			dog.forEach(dog.trace, dog.get.unworthy, [dog.maxFails], function (rel, sql) {
+				sql.query(&quot;UPDATE app.masters SET _Revoked=1 WHERE least(?)&quot;, { EndServiceID: rel.EndServiceID, License: rel.License });
+			});
+		}),
+
+		dogVoxels: Copy({
+			get: {
+				//unused: 
+				//	&quot;SELECT voxels.ID AS ID,aois.ID AS aoiID FROM app.voxels &quot;
+				//+ &quot; LEFT JOIN app.aois ON aois.name=voxels.class HAVING aoiID IS null&quot;
+				//, refresh: &quot;SELECT ID FROM app.voxels WHERE MBRcontains(ring, GeomFromText(?)) AND datediff(now(), added) &gt; ?&quot;
+			},
+			cycle: 120,
+			atmage: 2 // days to age before refresh atm data
+		}, function dogVoxels(dog) {
+
+			if (dog.get.unused) dog.forEach(dog.trace, dog.get.unused, [], function (voxel, sql) {
+				sql.query(&quot;DELETE FROM app.voxels WHERE ?&quot;, { ID: voxel.ID });
+			});
+
+			if (dog.get.refresh) // fetch new atm data from whatever service and loop over recs (grouped by Point(x y) grid location)
+				dog.forEach(dog.trace, dog.get.refresh, [atm.gridLocation, dog.atmage], function (voxel, sql) {
+					// update voxels with atm data
+				});
+		}),
+
+		dogCache: Copy({
+			//cycle: 120
+		}, function dogCache(dog) {}),
+
+		dogSystem: Copy({
+			cycle: 10,
+			max: {
+				cpu: 0.8,
+				disk: 200
+			},
+			get: {
+				threads: function threads(sql, cb) {
+					sql.query(&quot;show session status like 'Thread%'&quot;, {}, function (err, stats) {
+						cb({
+							running: stats[2].Value,
+							connected: stats[1].Value
+						});
+					});
+				},
+
+				cpu: function cpu(sql, cb) {
+					// compute average cpu utilization
+					var avgUtil = 0;
+					var cpus = OS.cpus();
+
+					cpus.forEach(function (cpu) {
+						idle = cpu.times.idle;
+						busy = cpu.times.nice + cpu.times.sys + cpu.times.irq + cpu.times.user;
+						avgUtil += busy / (busy + idle);
+					});
+					cb(avgUtil / cpus.length);
+				},
+
+				disk: function disk(sql, cb) {
+					sql.query(&quot;SELECT table_schema AS DB, &quot; + &quot;SUM(data_length + index_length) / 1024 / 1024 / 1024 AS GB FROM information_schema.TABLES &quot; + &quot;GROUP BY table_schema&quot;, {}, function (err, stats) {
+
+						var GB = 0;
+						stats.forEach(function (stat) {
+							GB += stat.GB;
+						});
+						cb(GB);
+					});
+				}
+			}
+		}, function dogSystem(dog) {
+
+			dog.thread(function (sql) {
+				dog.get.threads(sql, function (threads) {
+					dog.get.cpu(sql, function (cpu) {
+						dog.get.disk(sql, function (disk) {
+
+							sql.query(&quot;INSERT INTO openv.syslogs SET ?&quot;, {
+								t: new Date(), // start time
+								Action: &quot;watch&quot;, // db action
+								runningThreads: threads.running,
+								connectedThreads: threads.connected,
+								cpuUtil: cpu,
+								diskUtil: disk,
+								Module: TRACE
+							});
+
+							if (cpu &gt; dog.max.cpu) FLEX.sendMail({
+								subject: dog.site.nick + &quot; resource warning&quot;,
+								to: dog.site.pocs.admin,
+								body: &quot;Please add more VMs to &quot; + dog.site.nick + &quot; or &quot; + &quot;shed load&quot;.tag(&quot;a&quot;, { href: dog.site.urls.worker + &quot;/queues.view&quot; })
+							});
+
+							if (disk &gt; dog.max.disk) FLEX.sendMail({
+								subject: dog.site.nick + &quot; resource warning&quot;,
+								to: dog.site.pocs.admin,
+								body: &quot;Please add more disk space to &quot; + dog.site.nick + &quot; or &quot; + &quot;shed load&quot;.tag(&quot;a&quot;, { href: dog.site.urls.worker + &quot;/queues.view&quot; })
+							});
+
+							sql.release();
+						});
+					});
+				});
+			});
+		}),
+
+		dogStats: Copy({
+			//cycle: 1000,
+			get: {
+				lowsnr: &quot;SELECT count(events.ID) AS Rejects, events.voxelID AS voxelID, events.fileID AS fileID FROM app.events&quot; + &quot; LEFT JOIN app.voxels ON voxels.ID = events.voxelID AND voxels.enabled&quot; + &quot; LEFT JOIN app.files ON files.ID = events.fileID&quot; + &quot; WHERE files.snr &lt; voxels.minsnr&quot; + &quot; GROUP BY events.voxelID, events.fileID&quot;
+			}
+		}, function dogStats(dog) {
+
+			if (dog.get.lowsnr) dog.forEach(dog.trace, dog.get.lowsnr, [], function (prune, sql) {
+				Trace(&quot;PRUNE &quot; + [prune.fileID, prune.voxelID]);
+
+				sql.query(&quot;UPDATE app.files SET Rejects=Rejects+?,Relevance=1-Rejects/Samples WHERE ?&quot;, [prune.Rejects, { ID: prune.fileID }]);
+
+				sql.query(&quot;DELETE FROM app.events WHERE least(?)&quot;, { fileID: prune.fileID, voxelID: prune.voxelID });
+
+				/*sql.forAll(dog.trace, dog.get.lowsnr, [ file.snr, {&quot;events.fileID&quot;: file.ID} ], function (evs) {
+    	//Log(&quot;dog rejected&quot;, evs.length);
+    	sql.query(
+    		&quot;UPDATE app.files SET Rejects=Rejects+?,Relevance=1-Rejects/Samples WHERE ?&quot;, 
+    		[ evs.length, {ID: file.ID} ] 
+    	);
+    		evs.each( function (n,ev) {
+    		sql.query(&quot;DELETE FROM app.events WHERE ?&quot;, {ID: ev.ID});
+    	}); 
+    }); */
+			});
+		}),
+
+		dogFiles: Copy({
+			get: {
+				ungraded: &quot;SELECT ID,Name FROM app.files WHERE _State_graded IS null AND _Ingest_Time&gt;PoP_End AND Enabled&quot;,
+				unread: &quot;SELECT ID,Ring, st_centroid(ring) as Anchor, _Ingest_Time,PoP_advanceDays,PoP_durationDays,_Ingest_sampleTime,Name FROM app.files WHERE _Ingest_Time&gt;=PoP_Start AND _Ingest_Time&lt;=PoP_End AND Enabled&quot;,
+				//finished: &quot;SELECT ID,Name FROM app.files WHERE _Ingest_Time&gt;PoP_End&quot;,
+				expired: &quot;SELECT ID,Name FROM app.files WHERE PoP_Expires AND now() &gt; PoP_Expires AND Enabled&quot;
+				//retired: &quot;SELECT files.ID,files.Name,files.Client,count(events.id) AS evCount FROM app.events LEFT JOIN app.files ON events.fileID = files.id &quot;
+				//+ &quot; WHERE datediff( now(), files.added)&gt;=? AND NOT files.Archived AND Enabled GROUP BY fileID&quot;
+			},
+			cycle: 300, // secs
+			maxage: 90 // days
+		}, function dogFiles(dog) {
+
+			function pretty(stats, sigfig) {
+				var rtn = [];
+				Each(stats, function (key, stat) {
+					rtn.push((stat || 0).toFixed(sigfig) + &quot; &quot; + key);
+				});
+				return rtn.join(&quot;, &quot;);
+			}
+
+			var urls = DEBE.site.urls,
+			    fetcher = DEBE.fetcher;
+
+			/*
+   dog.forEach(dog.trace, dog.get.ungraded, [], function (file, sql) {
+   	Trace(&quot;GRADE &quot;+file.Name);
+   		DEBE.gradeIngest( sql, file, function (stats) {
+   			Log(&quot;grade&quot;, stats);
+   			if (stats) {
+   			var unsup = stats.unsupervised;
+   				sql.forAll(
+   				dog.trace,
+   				&quot;UPDATE app.files SET _State_graded=true, ?, _State_Notes=concat(_State_Notes,?) WHERE ?&quot;, [{
+   					tag: JSON.stringify(stats),
+   					coherence_time: unsup.coherence_time,
+   					coherence_intervals: unsup.coherence_intervals,
+   					degeneracy_param: unsup.degeneracy_param,
+   					//duration: stats.t,
+   					snr: unsup.snr
+   				},
+   				&quot;Initial SNR assessment: &quot; + (unsup.snr||0).toFixed(4),
+   				{ID: file.ID} 
+   			]);
+   		}
+   			else
+   			sql.query(
+   				&quot;UPDATE apps.file SET _State_graded=true, snr=0, _State_Notes=? WHERE ?&quot;, [
+   				&quot;Grading failed&quot;, {ID: file.ID} 
+   			]);
+   	});
+   });
+   */
+
+			if (dog.get.expired) dog.forEach(dog.trace, dog.get.expired, [], function (file, sql) {
+				Trace(&quot;EXPIRE &quot; + file.Name);
+				sql.query(&quot;DELETE FROM app.events WHERE ?&quot;, { fileID: file.ID });
+			});
+
+			if (dog.get.retired) dog.forEach(dog.trace, dog.get.retired, dog.maxage, function (file, sql) {
+				Trace(&quot;RETIRE &quot; + file.Name);
+
+				var site = DEBE.site,
+				    url = site.urls.worker,
+				    paths = {
+					moreinfo: &quot;here&quot;.tag(&quot;a&quot;, { href: url + &quot;/files.view&quot; }),
+					admin: &quot;totem resource manages&quot;.tag(&quot;a&quot;, { href: url + &quot;/request.view&quot; })
+				},
+				    notice = &quot;\nPlease note that &quot; + site.nick + &quot; has moved your sample &quot; + file.Name + &quot; to long term storage.  This sample \ncontains &quot; + file.eventCount + &quot; events.  Your archived sample will be auto-ingested should a &quot; + site.nick + &quot; plugin\nrequest this sample.  You may also consult &quot; + paths.admin + &quot; to request additional resources.  \nFurther information about this file is available &quot; + paths.moreinfo + &quot;. &quot;;
+
+				sql.query(&quot;UPDATE app.files SET ?, _State_Notes=concat(_State_Notes,?)&quot;, [{
+					Archived: true }, notice]);
+
+				/*
+    need to export events to output file, then archive this output file
+    CP.exec(`git commit -am &quot;archive ${path}&quot;; git push github master; rm ${zip}`, function (err) {
+    });*/
+
+				if (sendMail = FLEX.sendMail) sendMail({
+					to: file.client,
+					subject: &quot;TOTEM archived &quot; + file.Name,
+					body: notice
+				}, sql);
+			});
+
+			if (dog.get.finished) dog.forEach(dog.trace, dog.get.finished, [], function (file, sql) {
+				Trace(&quot;FINISHED &quot; + file.Name);
+				//sql.query(&quot;UPDATE app.files SET _State_ingested=1 WHERE ?&quot;,{ID:file.ID});
+			});
+
+			if (dog.get.unread) dog.forEach(dog.trace, dog.get.unread, [], function (file, sql) {
+				Trace(&quot;INGEST &quot; + file.Name);
+				var zero = { x: 0, y: 0 },
+				    ring = file.Ring || [[zero, zero, zero, zero, zero]],
+				    anchor = file.Anchor || zero,
+				    from = new Date(file._Ingest_Time),
+				    to = from.addDays(file.PoP_durationDays),
+				    path = urls.master + file.Name;
+
+				fetcher(path.tag(&quot;&amp;&quot;, {
+					fileID: file.ID,
+					from: from.toLocaleDateString(&quot;en-US&quot;),
+					to: to.toLocaleDateString(&quot;en-US&quot;),
+					lat: anchor.x,
+					lon: anchor.y,
+					radius: HACK.ringRadius(ring),
+					ring: ring,
+					durationDays: file.PoP_durationDays
+				}), null, function (msg) {
+					Log(&quot;INGEST&quot;, msg);
+				});
+
+				if (1) sql.query(&quot;UPDATE app.files SET _Ingest_Time=date_add(_Ingest_Time, interval PoP_advanceDays day), Revs=Revs+1 WHERE ?&quot;, { ID: file.ID });
+			});
+		}),
+
+		dogJobs: Copy({
+			get: {
+				//pigs: &quot;SELECT sum(DateDiff(Departed,Arrived)&gt;1) AS Count from app.queues&quot;,			
+				//unbilled: &quot;SELECT * FROM app.queues WHERE Finished AND NOT Billed&quot;,
+				unfunded: &quot;SELECT * FROM app.queues WHERE NOT Funded AND now()-Arrived&gt;?&quot;,
+				//stuck: &quot;UPDATE app.queues SET Departed=now(), Notes=concat(Notes, ' is ', link('billed', '/profile.view')), Age=Age + (now()-Arrived)/3600e3, Finished=1 WHERE least(Departed IS NULL,Done=Work)&quot;, 
+				outsourced: &quot;SELECT * FROM app.queues WHERE Class='polled' AND Now() &gt; Departed&quot;,
+				unmailed: &quot;SELECT * FROM app.queues WHERE NOT Finished AND Class='email' &quot;
+			},
+			max: {
+				pigs: 2,
+				age: 10
+			},
+			cycle: 300
+		}, function dogJobs(dog) {
+			var queues = DEBE.queues,
+			    fetcher = DEBE.fetcher;
+
+			if (pigs = dog.get.pigs) dog.forEach(dog.trace, pigs, [], function (pigs) {});
+
+			if (unmailed = dog.get.unmailed) dog.forEach(dog.trace, unmailed, [], function (job, sql) {
+				sql.query(&quot;UPDATE app.queues SET Finished=1 WHERE ?&quot;, { ID: job.ID });
+				sendMail({
+					to: job.Client,
+					subject: &quot;Totem update&quot;,
+					body: job.Notes
+				});
+			});
+
+			if (unbilled = dog.get.unbilled) dog.forEach(dog.trace, unbilled, [], function (job, sql) {
+				//Trace(`BILLING ${job} FOR ${job.Client}`, sql);
+				sql.query(&quot;UPDATE openv.profiles SET Charge=Charge+? WHERE ?&quot;, [job.Done, { Client: job.Client }]);
+
+				sql.query(&quot;UPDATE app.queues SET Billed=1 WHERE ?&quot;, { ID: job.ID });
+			});
+
+			if (unfunded = dog.get.unfunded) dog.forEach(dog.trace, unfunded, [dog.max.age], function (job, sql) {
+				//Trace(&quot;KILLING &quot;,job);
+				sql.query();
+			}
+			//&quot;DELETE FROM app.queues WHERE ?&quot;, {ID:job.ID}
+			);
+
+			if (stuck = dog.get.stuck) dog.thread(function (sql) {
+				sql.query(stuck, [], function (err, info) {
+
+					Each(queues, function (rate, queue) {
+						// save collected queuing charges to profiles
+						Each(queue.client, function (client, charge) {
+
+							if (charge.bill) {
+								//if ( trace ) Trace(`${trace} ${client} ${charge.bill} CREDITS`, sql);
+
+								sql.query(&quot;UPDATE openv.profiles SET Charge=Charge+?,Credit=greatest(0,Credit-?) WHERE ?&quot;, [charge.bill, charge.bill, { Client: client }], function (err) {
+									if (err) Trace(&quot;Job charge failed &quot; + err);
+								});
+
+								charge.bill = 0;
+							}
+						});
+					});
+					sql.release();
+				});
+			});
+
+			if (outsourced = dog.get.outsourced) dog.forEach(dog.trace, outsourced, [], function (job, sql) {
+				sql.query(&quot;UPDATE app.queues SET ?,Age=Age+Work,Departed=Date_Add(Departed,interval Work day) WHERE ?&quot;, [{ ID: job.ID }]);
+
+				fetcher(job.Notes, null, function (rtn) {
+					Log(&quot;dog job run &quot; + msg);
+				});
+			});
+		}),
+
+		xdogSystem: Copy({ // legacy
+			//cycle: 100,
+			get: {
+				engs: &quot;SELECT count(ID) AS Count FROM app.engines WHERE Enabled&quot;,
+				jobs: &quot;SELECT count(ID) AS Count FROM app.queues WHERE Departed IS NULL&quot;,
+				logs: &quot;SELECT sum(Delay&gt;20)+sum(Fault != '') AS Count FROM app.dblogs&quot;
+			},
+			jobs: 5
+		}, function dogSystem(dog) {
+			// system diag watch dog
+			var diag = DEBE.diag;
+
+			if (dog.get.engs) dog.thread(function (sql) {
+				sql.forEach(dog.trace, dog.get.engs, [], function (engs) {
+					sql.forEach(dog.trace, dog.get.jobs, [], function (jobs) {
+						sql.forEach(dog.trace, dog.get.logs, [], function (isps) {
+							var rtn = diag.counts = { Engines: engs.Count, Jobs: jobs.Count, Pigs: pigs.Count, Faults: isps.Count, State: &quot;ok&quot; };
+
+							for (var n in dog) {
+								if (rtn[n] &gt; 5 * dog[n]) rtn.State = &quot;critical&quot;;else if (rtn[n] &gt; dog[n]) rtn.State = &quot;warning&quot;;
+							}sql.release();
+						});
+					});
+				});
+			});
+		}),
+
+		dogClients: Copy({
+			//cycle: 100000,
+			get: {
+				needy: &quot;SELECT ID FROM openv.profiles WHERE useDisk&gt;?&quot;,
+				dormant: &quot;&quot;,
+				poor: &quot;&quot;,
+				naughty: &quot;SELECT ID FROM openv.profiles WHERE Banned&quot;,
+				uncert: &quot;SELECT ID FROM openv.profiles LEFT JOIN app.quizes ON profiles.Client=quizes.Client WHERE datediff(now(), quizes.Credited)&gt;?&quot;
+			},
+			disk: 10, //MB
+			qos: 2, //0,1,2,...
+			unused: 4, // days
+			certage: 360 // days
+		}, function dogClients(dog) {
+
+			if (dog.get.naughty) dog.forEach(dog.trace, dog.get.naughty, [], function (client, sql) {});
+
+			if (dog.get.needy) dog.forEach(dog.trace, dog.get.needy, [dog.disk], function (client, sql) {});
+
+			if (dog.get.dormant) dog.forEach(dog.trace, dog.get.dormant, [dog.unused], function (client, sql) {});
+
+			if (dog.get.poor) dog.forEach(dog.trace, dog.dog.get.poor, [dog.qos], function (client, sql) {});
+
+			if (dog.get.uncert) dog.forEach(dog.trace, dog.get.uncert, [dog.certage], function (client, sql) {});
+		}),
+
+		dogEngines: Copy({
+			//cycle: 600,
+			get: {
+				&quot;undefined&quot;: &quot;&quot;,
+				buggy: &quot;&quot;
+			},
+			&quot;undefined&quot;: 123,
+			bugs: 10
+		}, function dogEngines(sql, dog) {
+
+			if (dog.get.undefined) dog.forEach(dog.trace, dog.get.undefined, [dog.undefined], function (client, sql) {});
+		}),
+
+		dogUsers: Copy({
+			get: {
+				inactive: &quot;&quot;,
+				buggy: &quot;&quot;
+			},
+			//cycle: 1000,
+			inactive: 1,
+			bugs: 10
+		}, function dogUsers(dog) {
+			if (dog.get.inactive) dog.forEach(dog.trace, dog.get.inactive, [dog.inactive], function (client, sql) {});
+		})
+	},
+
+	diag: { //&lt; reserved for self diag parms
+		status: &quot;&quot;,
+		counts: { State: &quot;&quot; }
+	},
+
+	// request configuration
+
+	&quot;reqFlags.&quot;: { //&lt; endpoint request flags
+
+		&quot;traps.&quot;: { // TRAP=name flags can modify the request flags
+			save: function save(req) {
+				//&lt; _save=name retains query in named engine
+				var sql = req.sql,
+				    cleanurl = req.url.replace(&quot;_save=&quot; + req.flags.save, &quot;&quot;);
+
+				Trace(&quot;PUBLISH &quot; + cleanurl + &quot; AT &quot; + req.flags.save + &quot; FOR &quot; + req.client, sql);
+				sql.query(&quot;INSERT INTO app.engines SET ?&quot;, {
+					Name: req.flags.save,
+					Enabled: 1,
+					Type: &quot;url&quot;,
+					Code: cleanurl
+				});
+			},
+
+			browse: function browse(req) {
+				//&lt; _browse=name navigates named folder
+				var query = req.query,
+				    flags = req.flags;
+				query.NodeID = parseInt(query.init) ? &quot;&quot; : query.target || &quot;&quot;;
+				flags.nav = [query.NodeID, query.cmd];
+				delete query.cmd;
+				delete query.init;
+				delete query.target;
+				delete query.tree;
+			},
+
+			view: function view(req) {
+				//&lt; ?_view=name correlates named view to request dataset
+				req.sql.query(&quot;INSERT INTO openv.viewers SET ?&quot;, {
+					Viewer: req.flags.view,
+					Dataset: req.table
+				});
+			}
+		},
+
+		blog: function blog(recs, req, res) {
+			//&lt; renders dataset records
+			if (key = req.flags.blog) recs.blogify(req, key, req.table, res);else res(recs);
+		}
+
+	},
+
+	&quot;reqTypes.&quot;: { //&lt; endpoint types to convert dataset recs on specifed req-res thread
+
+		/*
+  view: function (recs,req,res) {  //&lt; dataset.view returns rendered skin
+  	res( recs );
+  },*/
+
+		exe: function exe(recs, req, res) {
+			res(recs);
+		},
+
+		kml: function kml(recs, req, res) {
+			//&lt; dataset.kml converts to kml
+			res(TOKML({}));
+		},
+
+		flat: function flat(recs, req, res) {
+			//&lt; dataset.flat flattens records
+			recs.forEach(function (rec, n) {
+				var rtns = new Array();
+				for (var key in rec) {
+					rtns.push(rec[key]);
+				}recs[n] = rtns;
+			});
+			res(recs);
+		},
+
+		txt: function txt(recs, req, res) {
+			//&lt; dataset.txt convert to text
+			var head = recs[0],
+			    cols = [],
+			    cr = String.fromCharCode(13),
+			    txt = &quot;&quot;,
+			    list = &quot;,&quot;;
+
+			if (head) {
+				for (var n in head) {
+					cols.push(n);
+				}txt += cols.join(list) + cr;
+
+				recs.forEach(function (rec) {
+					var cols = [];
+					for (var key in rec) {
+						cols.push(rec[key]);
+					}txt += cols.join(list) + cr;
+				});
+			}
+
+			res(txt);
+		},
+
+		json: function json(recs, req, res) {
+			res(recs);
+		},
+
+		stat: function stat(recs, req, res) {
+			// dataset.stat provide info
+			var table = req.table,
+			    group = req.group,
+			    uses = [&quot;db&quot;, &quot;xml&quot;, &quot;csv&quot;, &quot;txt&quot;, &quot;tab&quot;, &quot;view&quot;, &quot;tree&quot;, &quot;flat&quot;, &quot;delta&quot;, &quot;nav&quot;, &quot;encap&quot;, &quot;html&quot;, &quot;json&quot;, &quot;view&quot;, &quot;pivot&quot;, &quot;site&quot;, &quot;spivot&quot;, &quot;brief&quot;, &quot;gridbrief&quot;, &quot;pivbrief&quot;, &quot;run&quot;, &quot;plugin&quot;, &quot;runbrief&quot;, &quot;exe&quot;, &quot;stat&quot;];
+
+			uses.forEach(function (use) {
+				uses[n] = use.tag(&quot;a&quot;, { href: &quot;/&quot; + table + &quot;.&quot; + use });
+			});
+
+			req.sql.query(&quot;DESCRIBE ??.??&quot;, [group, table], function (err, stats) {
+
+				if (err) res(err);else {
+					stats.forEeach(function (stat, n) {
+						stats[n] = stat.Field.tag(&quot;a&quot;, { href: &quot;/&quot; + table + &quot;?_index=&quot; + stat.Field });
+					});
+
+					res(&quot;\nRecords: &quot; + recs.length + &quot;&lt;br&gt;\nFields: &quot; + stats.join(&quot;,&quot;) + &quot;&lt;br&gt;\nUsage: &quot; + uses.join(&quot;,&quot;) + &quot;  &quot;);
+				}
+			});
+		},
+
+		html: function html(recs, req, res) {
+			//&lt; dataset.html converts to html
+			res(DEBE.site.gridify(recs).tag(&quot;table&quot;, { border: &quot;1&quot; }));
+		},
+
+		// MS office doc reqTypes
+		xdoc: genDoc,
+		xxls: genDoc,
+		xpps: genDoc,
+		xppt: genDoc,
+
+		tree: function tree(recs, req, res) {
+			//&lt; dataset.tree treeifies records sorted with _sort=keys
+			res({
+				name: &quot;root&quot;,
+				weight: 1,
+				children: req.flags.sort ? recs.treeify(0, recs.length, 0, req.flags.sort.split(&quot;,&quot;)) : []
+			});
+		},
+
+		delta: function delta(recs, req, res) {
+			//&lt; dataset.delta adds change records from last baseline
+			var sql = req.sql;
+			var ctx = {
+				src: {
+					table: &quot;baseline.&quot; + req.table
+				}
+			};
+
+			sql.context(ctx, function (ctx) {
+				// establish skinning context for requested table
+				ctx.src.rec = function (Recs, me) {
+					// select the baseline records 
+
+					if (isError(Recs)) res(Recs);else res(recs.merge(Recs, Object.keys(Recs[0] || {})));
+				};
+			});
+		},
+
+		nav: function nav(recs, req, res) {
+			//&lt; dataset.nav to navigate records pivoted with _browse=keys
+
+			/*
+   Log({
+   	i: &quot;nav&quot;,
+   	c: keys,
+   	f: req.flags,
+   	q: req.query
+   });*/
+
+			var keys = Object.keys(recs[0] || {}),
+			    flags = req.flags,
+			    query = req.query,
+			    Browse = flags.browse.split(&quot;,&quot;),
+			    Cmd = keys.pop(),
+			    Slash = &quot;_&quot;,
+			    Parent = keys.pop(),
+			    Nodes = Parent ? Parent.split(Slash) : [],
+			    Folder = Browse[Nodes.length],
+			    Parent = Parent || &quot;root&quot;,
+			    Files = [{ // prime the side tree area
+				mime: &quot;directory&quot;,
+				ts: 1334071677,
+				read: 1,
+				write: 0,
+				size: recs.length,
+				hash: Parent,
+				volumeid: &quot;v1&quot;,
+				//phash: Back,	// cant do this for some reason
+				name: Parent + (Folder ? &quot;:&quot; + Folder : &quot;&quot;),
+				locked: 1,
+				dirs: 1
+			}];
+
+			Trace(&quot;NAVIGATE Recs=&quot; + recs.length + &quot; Parent=&quot; + Parent + &quot; Nodes=&quot; + Nodes + &quot; Folder=&quot; + Folder);
+
+			if (Folder) // at branch
+				recs.forEach(function (rec, n) {
+					Files.push({
+						mime: &quot;directory&quot;, // mime type
+						ts: 1310252178, // time stamp format?
+						read: rec.read, // read state
+						write: rec.write, // write state
+						size: rec.NodeCount, // size
+						hash: rec.NodeID, // hash name
+						name: rec.name || &quot;?&quot; + n, // keys name
+						phash: Parent, // parent hash name
+						locked: rec.locked, // lock state
+						volumeid: rec.group,
+						dirs: 1 // place inside tree too
+					});
+				});else // at leaf
+				recs.forEach(function (rec, n) {
+					// at leafs
+					Files.push({
+						mime: &quot;application/tbd&quot;, //&quot;application/x-genesis-rom&quot;,	//&quot;image/jpg&quot;, // mime type
+						ts: 1310252178, // time stamp format?
+						read: rec.read, // read state
+						write: rec.write, // write state
+						size: rec.NodeCount, // size
+						hash: rec.NodeID, // hash name
+						name: rec.name || &quot;?&quot; + n, // keys name
+						phash: Parent, // parent hash name
+						volumeid: rec.group,
+						locked: rec.locked // lock state
+					});
+				});
+
+			//Log(Files);	
+
+			switch (Cmd) {// Handle keys nav
+				case &quot;test&quot;:
+					// canonical test case for debugging					
+					res({
+						cwd: {
+							&quot;mime&quot;: &quot;directory&quot;,
+							&quot;ts&quot;: 1334071677,
+							&quot;read&quot;: 1,
+							&quot;write&quot;: 0,
+							&quot;size&quot;: 0,
+							&quot;hash&quot;: &quot;root&quot;,
+							&quot;volumeid&quot;: &quot;l1_&quot;,
+							&quot;name&quot;: &quot;Demo&quot;,
+							&quot;locked&quot;: 1,
+							&quot;dirs&quot;: 1 },
+
+						/*&quot;options&quot;:{
+      	&quot;path&quot;:&quot;&quot;, //&quot;Demo&quot;,
+      	&quot;url&quot;:&quot;&quot;, //&quot;http:\/\/elfinder.org\/files\/demo\/&quot;,
+      	&quot;tmbUrl&quot;:&quot;&quot;, //&quot;http:\/\/elfinder.org\/files\/demo\/.tmb\/&quot;,
+      	&quot;disabled&quot;:[&quot;extract&quot;],
+      	&quot;separator&quot;:&quot;\/&quot;,
+      	&quot;copyOverwrite&quot;:1,
+      	&quot;archivers&quot;: {
+      		&quot;create&quot;:[&quot;application\/x-tar&quot;, &quot;application\/x-gzip&quot;],
+      		&quot;extract&quot;:[] }
+      },*/
+
+						files: [{ // cwd again
+							&quot;mime&quot;: &quot;directory&quot;,
+							&quot;ts&quot;: 1334071677,
+							&quot;read&quot;: 1,
+							&quot;write&quot;: 0,
+							&quot;size&quot;: 0,
+							&quot;hash&quot;: &quot;root&quot;,
+							&quot;volumeid&quot;: &quot;l1_&quot;,
+							&quot;name&quot;: &quot;Demo&quot;,
+							&quot;locked&quot;: 1,
+							&quot;dirs&quot;: 1 },
+
+						/*{
+      &quot;mime&quot;:&quot;directory&quot;,
+      &quot;ts&quot;:1334071677,
+      &quot;read&quot;:1,
+      &quot;write&quot;:0,
+      &quot;size&quot;:0,
+      &quot;hash&quot;:&quot;root&quot;,
+      &quot;volumeid&quot;:&quot;l1_&quot;,
+      &quot;name&quot;:&quot;Demo&quot;,
+      &quot;locked&quot;:1,
+      &quot;dirs&quot;:1},*/
+
+						{
+							&quot;mime&quot;: &quot;directory&quot;,
+							&quot;ts&quot;: 1340114567,
+							&quot;read&quot;: 0,
+							&quot;write&quot;: 0,
+							&quot;size&quot;: 0,
+							&quot;hash&quot;: &quot;l1_QmFja3Vw&quot;,
+							&quot;name&quot;: &quot;Backup&quot;,
+							&quot;phash&quot;: &quot;root&quot;,
+							&quot;locked&quot;: 1 }, {
+							&quot;mime&quot;: &quot;directory&quot;,
+							&quot;ts&quot;: 1310252178,
+							&quot;read&quot;: 1,
+							&quot;write&quot;: 0,
+							&quot;size&quot;: 0,
+							&quot;hash&quot;: &quot;l1_SW1hZ2Vz&quot;,
+							&quot;name&quot;: &quot;Images&quot;,
+							&quot;phash&quot;: &quot;root&quot;,
+							&quot;locked&quot;: 1 }, {
+							&quot;mime&quot;: &quot;directory&quot;,
+							&quot;ts&quot;: 1310250758,
+							&quot;read&quot;: 1,
+							&quot;write&quot;: 0,
+							&quot;size&quot;: 0,
+							&quot;hash&quot;: &quot;l1_TUlNRS10eXBlcw&quot;,
+							&quot;name&quot;: &quot;MIME-types&quot;,
+							&quot;phash&quot;: &quot;root&quot;,
+							&quot;locked&quot;: 1 }, {
+							&quot;mime&quot;: &quot;directory&quot;,
+							&quot;ts&quot;: 1268269762,
+							&quot;read&quot;: 1,
+							&quot;write&quot;: 0,
+							&quot;size&quot;: 0,
+							&quot;hash&quot;: &quot;l1_V2VsY29tZQ&quot;,
+							&quot;name&quot;: &quot;Welcome&quot;,
+							&quot;phash&quot;: &quot;root&quot;,
+							&quot;locked&quot;: 1,
+							&quot;dirs&quot;: 1 }, {
+							&quot;mime&quot;: &quot;directory&quot;,
+							&quot;ts&quot;: 1390785037,
+							&quot;read&quot;: 1,
+							&quot;write&quot;: 1,
+							&quot;size&quot;: 0,
+							&quot;hash&quot;: &quot;l2_Lwxxyyzz&quot;,
+							&quot;volumeid&quot;: &quot;l2_&quot;,
+							&quot;name&quot;: &quot;Test here&quot;,
+							&quot;locked&quot;: 1 }, {
+							&quot;mime&quot;: &quot;application\/x-genesis-rom&quot;,
+							&quot;ts&quot;: 1310347586, &quot;read&quot;: 1,
+							&quot;write&quot;: 0,
+							&quot;size&quot;: 3683,
+							&quot;hash&quot;: &quot;l1_UkVBRE1FLm1k&quot;,
+							&quot;name&quot;: &quot;README.md&quot;,
+							&quot;phash&quot;: &quot;root&quot;,
+							&quot;locked&quot;: 1 }],
+
+						api: &quot;2.0&quot;, &quot;uplMaxSize&quot;: &quot;16M&quot;, &quot;netDrivers&quot;: [],
+
+						debug: {
+							&quot;connector&quot;: &quot;php&quot;,
+							&quot;phpver&quot;: &quot;5.3.26-1~dotdeb.0&quot;,
+							&quot;time&quot;: 0.016080856323242,
+							&quot;memory&quot;: &quot;1307Kb \/ 1173Kb \/ 128M&quot;,
+							&quot;upload&quot;: &quot;&quot;,
+							&quot;volumes&quot;: [{ &quot;id&quot;: &quot;l1_&quot;,
+								&quot;name&quot;: &quot;localfilesystem&quot;,
+								&quot;mimeDetect&quot;: &quot;internal&quot;,
+								&quot;imgLib&quot;: &quot;imagick&quot; }, { &quot;id&quot;: &quot;l2_&quot;,
+								&quot;name&quot;: &quot;localfilesystem&quot;,
+								&quot;mimeDetect&quot;: &quot;internal&quot;,
+								&quot;imgLib&quot;: &quot;gd&quot; }],
+
+							&quot;mountErrors&quot;: [] }
+					});
+					break;
+
+				/*case &quot;tree&quot;: 	// not sure when requested
+    	return {
+    		tree: Files,
+    			debug: {
+    			connector:&quot;php&quot;,
+    			phpver:&quot;5.3.26-1~dotdeb.0&quot;,
+    			time:0.016080856323242,
+    			memory:&quot;1307Kb \/ 1173Kb \/ 128M&quot;,
+    			upload:&quot;&quot;,
+    			volumes:[{	id:&quot;l1_&quot;,
+    						name:&quot;localfilesystem&quot;,
+    						mimeDetect:&quot;internal&quot;,
+    						imgLib:&quot;imagick&quot;},
+    						{	id:&quot;l2_&quot;,
+    						name:&quot;localfilesystem&quot;,
+    						mimeDetect:&quot;internal&quot;,
+    						imgLib:&quot;gd&quot;}],
+    				mountErrors:[]
+    		}		
+    	};	
+    	break;*/
+
+				case &quot;size&quot;:
+					// on directory info
+					res({
+						size: 222
+					});
+					break;
+
+				case &quot;parents&quot;: // not sure when requested
+				case &quot;rename&quot;: // on rename with name=newname
+				case &quot;keys&quot;:
+					// on open via put, on download=1 via get
+					res({
+						message: &quot;TBD&quot;
+					});
+					break;
+
+				case &quot;tree&quot;:
+				case &quot;open&quot;:
+					// on double-click to follow
+					res({
+						cwd: Files[0],
+						/*{ 
+      	mime:&quot;directory&quot;,
+      	ts:1334071677,
+      	read:1,
+      	write:0,
+      	size:999,
+      	hash: flags.NodeID,
+      	phash: &quot;&quot;, //cwdBack,
+      	volumeid:&quot;tbd&quot;, //&quot;l1_&quot;,
+      	name: Folder,
+      	locked:0,
+      	dirs:1},*/
+
+						options: {
+							path: &quot;/&quot;, //cwdPath,
+							url: &quot;/&quot;, //&quot;/root/&quot;,
+							tmbUrl: &quot;/root/.tmb/&quot;,
+							disabled: [&quot;extract&quot;],
+							separator: Slash,
+							copyOverwrite: 1,
+							archivers: {
+								create: [&quot;application/x-tar&quot;, &quot;application/x-gzip&quot;],
+								extract: [] }
+						},
+
+						files: Files,
+
+						api: &quot;2.0&quot;,
+						uplMaxSize: &quot;16M&quot;,
+						netDrivers: [],
+
+						debug: {
+							connector: &quot;php&quot;,
+							phpver: &quot;5.3.26-1~dotdeb.0&quot;,
+							time: 0.016080856323242,
+							memory: &quot;1307Kb \/ 1173Kb \/ 128M&quot;,
+							upload: &quot;&quot;,
+							volumes: [{ id: &quot;v1&quot;,
+								name: &quot;localfilesystem&quot;,
+								mimeDetect: &quot;internal&quot;,
+								imgLib: &quot;imagick&quot; }, { id: &quot;v2&quot;,
+								name: &quot;localfilesystem&quot;,
+								mimeDetect: &quot;internal&quot;,
+								imgLib: &quot;gd&quot; }],
+							mountErrors: []
+						}
+					});
+					break;
+
+				default:
+					res({
+						message: &quot;bad navigation command&quot;
+					});
+			}
+		}
+
+	},
+
+	// endpoint configuration
+
+	&quot;byArea.&quot;: {//&lt; routers for endpoints at /AREA/file ...
+	},
+
+	&quot;byTable.&quot;: { //&lt; routers for endpoints at /TABLE
+		agent: sysAgent,
+		//help: sysHelp,
+		alert: sysAlert,
+		//ping: sysPing,
+		ingest: sysIngest
+		//stop: sysStop,
+		//bit: sysBIT,
+		//atom: ATOM.exe
+		//kill: sysKill,
+		//start: sysStart,
+		//checkpt: sysCheckpt,
+		//codes: sysCodes,
+		//config: sysConfig
+	},
+
+	&quot;byType.&quot;: { //&lt; routers for endpoint types at /DATASET.TYPE
+		// file attributes
+		//code: sharePlugin,
+		//jade: sharePlugin,	
+		/*
+  classif: sendAttr,
+  readability: sendAttr,
+  client: sendAttr,
+  size: sendAttr,
+  risk: sendAttr,
+  */
+
+		// doc generators
+		xpdf: sendDoc,
+		xjpg: sendDoc,
+		xgif: sendDoc,
+
+		// plugin attributes
+		md: sharePlugin,
+		tou: sharePlugin,
+		status: sharePlugin,
+		suitors: sharePlugin,
+		pub: sharePlugin,
+		users: sharePlugin,
+		state: sharePlugin,
+		js: sharePlugin,
+		py: sharePlugin,
+		m: sharePlugin,
+		me: sharePlugin,
+		jade: sharePlugin,
+		get: sharePlugin,
+
+		// skins
+		view: renderSkin,
+		calc: renderSkin,
+		run: renderSkin,
+		plugin: renderSkin,
+		site: renderSkin,
+		brief: renderSkin,
+		pivot: renderSkin,
+		gridbrief: renderSkin,
+		runbrief: renderSkin,
+		pivbrief: renderSkin,
+
+		// plugins
+		exe: exePlugin,
+		add: extendPlugin,
+		sub: retractPlugin
+	},
+
+	&quot;byActionTable.&quot;: {//&lt; routers for CRUD endpoints at /DATASET 
+	},
+
+	// private parameters
+
+	admitRule: {//&lt; admitRule all clients by default 	
+	},
+
+<span id='DEBE-cfg-context'>	/**
+</span> @private
+ @cfg {Object}
+ @member DEBE
+ Defines site context keys to load skinning context before a skin is rendered.
+ Each skin has its own {key: &quot;SQL DB.TABLE&quot; || &quot;/URL?QUERY&quot;, ... } spec.
+ */
+	context: {//&lt; site context extenders
+		/*swag: {  // context keys for swag.view
+  	projs: &quot;openv.milestones&quot;
+  },
+  airspace: {
+  	projs: &quot;openv.milestones&quot;
+  },
+  plugin: {
+  	projs: &quot;openv.milestones&quot;
+  },
+  briefs: {
+  	projs: &quot;openv.milestones&quot;
+  },
+  rtpsqd: {
+  	apps:&quot;openv.apps&quot;,
+  	users: &quot;openv.profiles&quot;,
+  	projs: &quot;openv.milestones&quot;,
+  	QAs: &quot;app.QAs&quot;
+  	//stats:{table:&quot;openv.profiles&quot;,group:&quot;client&quot;,index:&quot;client,event&quot;}
+  } */
+	},
+
+	&quot;site.&quot;: { //&lt; initial site context
+
+		classif: {
+			level: &quot;&quot;,
+			purpose: &quot;&quot;,
+			banner: &quot;&quot;
+		},
+
+		info: {},
+
+<span id='DEBE-Skinning'>		/**
+</span>  @class DEBE.Skinning
+  */
+		get: function get(recs, where, index, subs) {
+			//&lt; index dataset
+<span id='DEBE-Skinning-method-get'>			/**
+</span>   @method get
+   Provides a data indexer when a skin is being rendered.
+   @param {Array} recs Record source
+   @param {Array} where {recKey:value, ...} to match recs
+   @param {Array} index &quot;recKey,...&quot; keys to retain from recs
+   @param {Array} subs {hash: {recKey: {key:value, ...}. ...}, ...} replace record values
+   */
+
+			function select(keys) {
+
+				switch ((keys || 0).constructor) {
+					case Object:
+						for (var key in keys) {
+							return &quot;SELECT * FROM ??.?? WHERE least(?,1)&quot;;
+						}return &quot;SELECT * FROM ??.??&quot;;
+
+					case Array:
+						return &quot;&quot;;
+
+					case String:
+						return &quot;SELECT * FROM ??.? WHERE &quot; + keys;
+
+					case Function:
+						return &quot;&quot;;
+
+					default:
+						return &quot;&quot;;
+				}
+			}
+
+			var rtns = [];
+
+			switch ((index || 0).constructor) {
+				case String:
+					var idx = {};
+					index.split(&quot;,&quot;).forEach(function (key) {
+						idx[key] = key;
+					});
+					index = idx;
+					break;
+
+				case Array:
+					return null;
+					break;
+
+				case Function:
+					Thread(function (sql) {
+						try {
+							sql.query(select(where), [req.group, recs, where], function (err, recs) {
+								index(err ? [] : recs);
+							}).end();
+							//sql.release();
+						} catch (err) {
+							index([]);
+						}
+					});
+					return null;
+			}
+
+			recs.forEach(function (rec) {
+				var match = true;
+
+				if (where) for (var x in where) {
+					if (rec[x] != where[x]) match = false;
+				}if (match) {
+					if (subs) Each(subs, function (pre, sub) {
+						// make #key and ##kEy substitutions
+						for (var idx in sub) {
+							var keys = sub[idx];
+							if (rec[idx]) for (var key in keys) {
+								rec[idx] = (rec[idx] + &quot;&quot;).replace(pre + key, keys[key]);
+							}
+						}
+					});
+
+					/*
+     if (sub1) {
+     	for (var idx in sub1) {
+     		var keys = sub1[idx];
+     		if ( rec[idx] )
+     			for (var key in keys)
+     				rec[idx] = (rec[idx] + &quot;&quot;).replace(&quot;#&quot; + key, keys[key]);
+     	}
+     }*/
+
+					if (index) {
+						var rtn = new Object();
+						for (var key in index) {
+							var src = rec;
+							key.split(&quot;.&quot;).forEach(function (idx) {
+								src = src[idx];
+							});
+							rtn[index[key]] = src;
+						}
+						rec = rtn;
+					}
+
+					rtns.push(rec);
+				}
+			});
+
+			return rtns;
+		},
+
+		json: function json(recs) {
+			//&lt; jsonize dataset
+<span id='DEBE-Skinning-method-json'>			/**
+</span>   @method json
+   Jsonize records.
+   @param {Array} recs Record source
+   */
+			return JSON.stringify(recs);
+		},
+
+		tag: function tag(src, el, tags) {
+<span id='DEBE-Skinning-method-tag'>			/**
+</span>   @method tag
+   */
+			return tags ? src.tag(el, tags) : src.tag(&quot;a&quot;, { href: el });
+		},
+
+		hover: function hover(ti, fn) {
+<span id='DEBE-Skinning-method-hover'>			/**
+</span>   @method hover
+   Title ti fileName fn
+   */
+			if (fn.charAt(0) != &quot;/&quot;) fn = &quot;/shares/hover/&quot; + fn;
+			return ti.tag(&quot;p&quot;, { class: &quot;sm&quot; }) + (&quot;&quot;.tag(&quot;img&quot;, { src: fn + &quot;.jpg&quot; }) + &quot;&quot;.tag(&quot;iframe&quot;, { src: fn + &quot;.html&quot; }).tag(&quot;div&quot;, { class: &quot;ctr&quot; }).tag(&quot;div&quot;, { class: &quot;mid&quot; })).tag(&quot;div&quot;, { class: &quot;container&quot; });
+		},
+
+		gridify: function gridify(recs, noheader) {
+			//&lt; dump dataset as html table
+<span id='DEBE-Skinning-method-gridify'>			/**
+</span>   @method gridify
+   */
+			return recs.gridify(noheader);
+		}
+	},
+
+	&quot;errors.&quot;: { //&lt; error messages
+		pretty: function pretty(err) {
+			return &quot;&quot;.tag(&quot;img&quot;, { src: &quot;/stash/reject.jpg&quot;, width: 40, height: 60 }) + (err + &quot;&quot;).replace(/\n/g, &quot;&lt;br&gt;&quot;).replace(process.cwd(), &quot;&quot;).replace(&quot;Error:&quot;, &quot;&quot;) + &quot;. &quot; + &quot;Issues&quot;.tag(&quot;a&quot;, { href: &quot;/issues.view&quot; }) + &quot; || &quot; + &quot;Home&quot;.tag(&quot;a&quot;, { href: &quot;/home.view&quot; }) + &quot; || &quot; + &quot;API&quot;.tag(&quot;a&quot;, { href: &quot;/api.view&quot; });
+		},
+		noPartner: new Error(&quot;endservice missing or did not respond with transition partner&quot;),
+		noAttribute: new Error(&quot;undefined engine attribute&quot;),
+		noEngine: new Error(&quot;no such engine&quot;),
+		badAgent: new Error(&quot;bad agent request&quot;),
+		noIngest: new Error(&quot;invalid/missing ingest dataset&quot;),
+		badSkin: new Error(&quot;skin contains invalid jade&quot;),
+		badDataset: new Error(&quot;dataset does not exist&quot;),
+		noCode: new Error(&quot;engine has no code file&quot;),
+		badFeature: new Error(&quot;unsupported feature&quot;),
+		noOffice: new Error(&quot;office docs not enabled&quot;),
+		noExe: new Error(&quot;no execute interface&quot;),
+		noContext: new Error(&quot;no engine context&quot;),
+		noUsecase: new Error(&quot;no usecase provided to plugin&quot;),
+		certFailed: new Error(&quot;could not create pki cert&quot;),
+		badEntry: new Error(&quot;sim engines must be accessed at master url&quot;)
+	},
+
+	&quot;paths.&quot;: { //&lt; paths to things
+		//default: &quot;home.view&quot;,
+
+		jadePath: &quot;./public/jade/ref.jade&quot;, // jade reference path for includes, exports, appends
+
+		engine: &quot;SELECT * FROM app.engines WHERE least(?,1) LIMIT 1&quot;,
+		jades: &quot;./public/jade/&quot;, // path to default view skins
+
+		mime: {
+			/*
+   //tour: &quot;.&quot;,		 			//&lt; enable totem touring 
+   //jobs: &quot;./public/jobs&quot;,		//&lt; path to tau simulator job files
+   stash: &quot;.&quot;, 		//&lt; totem static file area
+   stores: &quot;./public&quot;, 		//&lt; persistant file store area
+   uploads: &quot;./public&quot;, 		//&lt; one-time file store area
+   chips: &quot;./public/images&quot;,	//&lt; chipped jpg files
+   tips: &quot;./public/images&quot;,	//&lt; tipped/compressed jpg files
+   data: &quot;./public&quot;,  //&lt; debug data
+   jade: &quot;./public&quot;,		//&lt; path to initial views
+   shares: &quot;./public&quot;, 				//&lt; shared public files
+   docs: &quot;.&quot;, 					//&lt; html documents
+   &quot;socket.io&quot;: &quot;.&quot;,				//&lt; path to socket.io to interconnect clients
+   clients: &quot;.&quot;,				//&lt; path to 3rd party ui clients
+   uis: &quot;.&quot;, 					//&lt; path to debe ui drivers
+   //icons: &quot;.&quot;,				//&lt; path to icons
+   captcha: &quot;.&quot;,		//&lt; path to captcha jpgs for antibot protection		
+   */
+			/*index: { 					//&lt; paths for allowed file indexers (&quot;&quot; to use url path)
+   	shares: &quot;&quot;,
+   	uploads: &quot;&quot;,
+   	stores: &quot;&quot;
+   	//public: &quot;&quot;,
+   	//data: &quot;&quot;
+   },*/
+			xlate: null, //&lt; i18n path to po translation files
+
+			extensions: { // extend mime types as needed
+				rdp: &quot;application/mstsc&quot;,
+				run: &quot;text/html&quot;,
+				exe: &quot;text/html&quot;,
+				js: &quot;text/plain&quot;,
+				py: &quot;text/plain&quot;,
+				ma: &quot;text/plain&quot;
+			}
+		},
+
+		skin: {
+			org1: &quot;./public/jade/Org1&quot;,
+			org2: &quot;./public/jade/Org2&quot;,
+			mood1: &quot;./public/jade/Mood1&quot;
+		}
+	},
+
+<span id='DEBE-cfg-probono'>	/**
+</span> @cfg {Boolean}
+ @member DEBE
+ Enable to give-away plugin services
+ */
+	probono: false, //&lt; enable to run plugins unregulated
+
+	//Function: Initialize,  //&lt; added to ENUM callback stack
+
+<span id='DEBE-cfg-isSpawned'>	/**
+</span> @cfg {Boolean}
+ @member DEBE
+ Enabled when this is child server spawned by a master server
+ */
+	isSpawned: false, //&lt; Enabled when this is child server spawned by a master server
+
+	/*
+ gradeIngest: function (sql, file, cb) {  //&lt; callback cb(stats) or cb(null) if error
+ 	
+ 	var ctx = {
+ 		Flow: {
+ 			F: &quot;tbd&quot;,
+ 			N: file._Ingest_Actors,  // ensemble size
+ 			T: file.Steps  // number of time steps
+ 		}, 
+ 		lma: [70],
+ 		Events: sql.format(  // event query
+ 			&quot;SELECT * FROM app.events WHERE fileID=? ORDER BY t LIMIT 10000&quot;, [file.ID] )
+ 	};
+ 	
+ 	Log(&quot;ingest stats ctx&quot;, ctx);
+ 	
+ 	if (cints = LAB.plugins.cints) 
+ 		cints( ctx, function (ctx) {  // estimate/learn hidden process parameters
+ 			
+ 			if ( ctx ) {
+ 				var stats = ctx.Save.pop() || {};  // retain last estimate at end
+ 				Log(&quot;ingest stats&quot;, stats);
+ 					cb(stats);
+ 			}
+ 			
+ 			else
+ 				cb(null);
+ 		}); 
+ 	
+ }, */
+
+<span id='DEBE-cfg-bySOAP'>	/**
+</span> @cfg {Object}
+ @member DEBE
+ @private
+ reserved for soap interfaces
+ */
+	bySOAP: { //&lt; action:route hash for XML-driven engines
+		get: &quot;&quot;,
+		put: &quot;&quot;,
+		delete: &quot;&quot;,
+		post: &quot;/service/algorithm/:proxy&quot; //&lt; hydra endpoint
+	}, //&lt; reserved for soap interfaces
+
+	ingestFile: function ingestFile(sql, filePath, fileName, fileID, cb) {
+		// ingest events from file with callback cb(aoi).
+
+		//Log(&quot;ingest file&quot;, filePath, fileName, fileID);
+
+		HACK.ingestFile(sql, filePath, fileID, function (aoi) {
+			Log(&quot;INGESTED&quot;, aoi);
+		});
+	},
+
+<span id='DEBE-cfg-blindTesting'>	/**
+</span> @cfg {Boolean}
+ @member DEBE
+ Enable for double-blind testing 
+ */
+	blindTesting: false //&lt; Enable for double-blind testing (eg make FLEX susceptible to sql injection attacks)
+}, TOTEM, &quot;.&quot;);
+
+<span id='DEBE-Utilities-SOAP'>/**
+</span>@class DEBE.Utilities.SOAP
+*/
+
+function SOAPsession(req, res, peer, action) {
+<span id='DEBE-Utilities-SOAP-method-SOAPsession'>	/**
+</span> @method SOAPsession
+ @private
+ 
+ Process an bySOAP session peer-to-peer request.  Currently customized for Hydra-peer and 
+ could/should be revised to support more generic peer-to-peer bySOAP interfaces.
+  
+ @param {Object} req HTTP request
+ @param {Object} res HTTP response
+ @param {Function} proxy Name of APP proxy function to handle this session.
+ */
+	Thread(function (sql) {
+		req.addListener(&quot;data&quot;, function (data) {
+			XML2JS.parseString(data.toString(), function (err, json) {
+				// hydra specific parse
+
+				hydrareq = false ? json[&quot;soapenv:Envelope&quot;][&quot;soapenv:Body&quot;][0][&quot;swag:SWAGRequest&quot;][0] // hydra soapui request
+				: json[&quot;soap:Envelope&quot;][&quot;soap:Body&quot;][0][&quot;SWAGRequest&quot;][0]; // hydra peer request
+
+				for (var n in hydrareq) {
+					switch (n) {
+						case &quot;xmls&quot;:
+						case &quot;$&quot;:
+						case &quot;inFileName&quot;:
+						case &quot;outFileName&quot;:
+						case &quot;feature&quot;:
+							ENV[n.toUpperCase()] = hydrareq[n][0];
+							break;
+
+						default:
+							ENV[n.toUpperCase()] = parseFloat(hydrareq[n][0]);
+					}
+				}var VTL = (APP[action] || {})[peer];
+
+				Trace(action.toUpperCase() + peer + (VTL ? &quot;LOCATED&quot; : &quot;MISSING&quot;));
+
+				if (VTL) VTL(req, function (msg) {
+					Trace(&quot;PEER &quot; + peer + &quot;:&quot; + msg);
+				});
+			});
+		});
+
+		res.statusCode = 200;
+		sql.reply(res, &quot;0&quot;);
+	});
+}
+
+function icoFavicon(req, res) {
+	// extjs trap
+	res(&quot;No icons here&quot;);
+}
+
+<span id='DEBE-End_Points-Attributes'>/**
+</span>@class DEBE.End_Points.Attributes
+get and send dataset attributes
+*/
+
+function sendCert(req, res) {
+	// create/return public-private certs
+<span id='DEBE-End_Points-Attributes-method-sendCert'>	/**
+</span> @method sendCert
+ Totem (req,res)-endpoint to create/return public-private certs
+ @param {Object} req Totem request
+ @param {Function} res Totem response
+ */
+
+	var owner = req.table,
+	    pass = req.type;
+
+	DEBE.prime(owner, pass, {}, function () {
+
+		CP.exec(&quot;puttygen &quot; + owner + &quot;.key -N &quot; + pass + &quot; -o &quot; + owner + &quot;.ppk&quot;, function (err) {
+
+			if (err) res(DEBE.errors.certFailed);else {
+				var paths = DEBE.paths,
+				    site = DEBE.site,
+				    master = site.urls.master,
+				    FF = &quot;Firefox&quot;.tag(&quot;a&quot;, { href: master + &quot;/stash/firefox.zip&quot; }),
+				    Putty = &quot;Putty&quot;.tag(&quot;a&quot;, { href: master + &quot;/stash/putty.zip&quot; }),
+				    Cert = &quot;Cert&quot;.tag(&quot;a&quot;, { href: master + &quot;/cert/&quot; + owner });
+
+				res(function () {
+					return {
+						area: &quot;&quot;,
+						name: owner + &quot;.ppk&quot;
+					};
+				});
+
+				FLEX.sendMail({
+					from: DEBE.site.ASP,
+					to: DEBE.site.ISP,
+					cc: name,
+					subject: DEBE.site.Nick + &quot; account request&quot;,
+					html: (&quot;Greetings from &quot; + site.Nick.tag(&quot;a&quot;, { href: master }) + &quot;-\n\nPlease create an AWS EC2 account for &quot; + owner + &quot; using attached cert.\n\nTo connect to &quot; + site.Nick + &quot; from Windows:\n\n1. establish gateway &quot; + Putty + &quot; | SSH | Tunnels | (SourcePort, Destination):\n\t\n\t5001, &quot; + site.Host + &quot;:22\n\t5100, &quot; + site.Host + &quot;:3389\n\t5200, &quot; + site.Host + &quot;:8080\n\t5910, &quot; + site.Host + &quot;:5910\n\t5555, Dynamic\n\n2. setup &quot; + Putty + &quot; interface:\n\t\n\tPageant | Add Keys | your private ppk cert\n\n3. start a &quot; + site.Nick + &quot; session using one of these methods:\n\n\t&quot; + Putty + &quot; | Session | Host Name = localhost:5001 \n\tRemote Desktop Connect| Computer = localhost:5100 \n\t&quot; + FF + &quot; | Options | Network | Settings | Manual Proxy | Socks Host = localhost, Port = 5555, Socks = v5\n&quot;).replace(/\n/g, &quot;&lt;br&gt;&quot;),
+
+					attachments: [{
+						fileName: Cert,
+						path: paths.certs + name + &quot;.pub&quot;
+					}],
+					alternatives: [{
+						contentType: 'text/html; charset=&quot;ISO-59-1&quot;',
+						contents: &quot;&quot;
+					}]
+				});
+			}
+		});
+	});
+}
+
+function sendAttr(req, res) {
+	// send file attribute
+<span id='DEBE-End_Points-Attributes-method-sendAttr'>	/**
+</span> @method sendAttr
+ Totem (req,res)-endpoint to send the .area attribute of a .table file 
+ @param {Object} req Totem request
+ @param {Function} res Totem response
+ */
+
+	var attr = req.area,
+	    table = req.table,
+	    sql = req.sql;
+
+	sql.query(&quot;SELECT *,count(ID) AS count FROM app.files WHERE least(?) LIMIT 0,1&quot;, { Area: area, Name: table }).on(&quot;result&quot;, function (file) {
+		res((&quot;body {background-color:red;}&quot;.tag(&quot;style&quot;) + (file[attr] || &quot;?&quot;).tag(&quot;body&quot;)).tag(&quot;html&quot;));
+	});
+}
+
+<span id='DEBE-End_Points-Plugin'>/**
+</span>@class DEBE.End_Points.Plugin
+support for plugins (a dataset-engine couple).
+*/
+
+function extendPlugin(req, res) {
+<span id='DEBE-End_Points-Plugin-method-extendPlugin'>	/**
+</span> @private
+ @method extendPlugin
+ Totem (req,res)-endpoint to add req.query keys to plugin req.table.
+ @param {Object} req http request
+ @param {Function} res Totem response callback
+ */
+
+	var sql = req.sql,
+	    ds = req.table,
+	    query = req.query;
+
+	res(&quot;ok&quot;);
+
+	Each(query, function (key, val) {
+		var type = &quot;varchar(32)&quot;;
+
+		if (parseFloat(val)) type = &quot;float&quot;;else if (parseInt(val)) type = &quot;int(11)&quot;;else try {
+			var val = JSON.parse(val);
+			type = val === true || val === false ? &quot;boolean&quot; : &quot;json&quot;;
+		} catch (err) {
+			type = val == &quot;doc&quot; ? &quot;mediumtext&quot; : &quot;varchar(&quot; + val.length + &quot;)&quot;;
+		}
+
+		sql.query(&quot;ALTER TABLE ??.?? ADD ?? &quot; + type, [req.group, ds, key]);
+	});
+}
+
+function retractPlugin(req, res) {
+<span id='DEBE-End_Points-Plugin-method-retractPlugin'>	/**
+</span> @private
+ @method retractPlugin
+ Totem (req,res)-endpoint to remove req.query keys from plugin req.table.
+ @param {Object} req http request
+ @param {Function} res Totem response callback
+ */
+
+	var sql = req.sql,
+	    ds = req.table,
+	    query = req.query;
+
+	res(&quot;ok&quot;);
+
+	Each(query, function (key, val) {
+
+		sql.query(&quot;ALTER TABLE ??.?? DROP ?? &quot;, [req.group, ds, key]);
+	});
+}
+
+function exePlugin(req, res) {
+<span id='DEBE-End_Points-Plugin-method-exePlugin'>	/**
+</span> @private
+ @method exePlugin
+ Totem (req,res)-endpoint to execute plugin req.table using usecase req.query.ID || req.query.Name.
+ @param {Object} req http request
+ @param {Function} res Totem response callback
+ */
+
+	function pipePlugin(pipe, ctx, cb) {
+		req.query = ctx;
+		ATOM.select(req, function (ctx) {
+			// run plugin
+
+			for (var key in pipe) {
+				delete ctx[key];
+			}if (isError(ctx)) Log(ctx.Host + &quot; &quot; + ctx);else cb(ctx);
+		});
+	}
+
+	var now = new Date(),
+	    sql = req.sql,
+	    client = req.client,
+	    profile = req.profile,
+	    group = req.group,
+	    table = req.table,
+	    profile = req.profile,
+	    query = req.query,
+	    host = table;
+
+	//Log(&quot;exe&quot;, query );
+	if (days = parseInt(query.days || &quot;0&quot;) + parseInt(query.hours || &quot;0&quot;) / 24) {
+		res(&quot;queueing polled job&quot;);
+		delete query.days;
+		delete query.hours;
+		sql.query(&quot;INSERT INTO app.queues SET ?&quot;, {
+			Client: client,
+			Class: &quot;polled&quot;,
+			QoS: profile.QoS, // [secs] job polling
+			Task: table,
+			Work: days,
+			Notes: &quot;/&quot; + table.tag(&quot;?&quot;, query),
+			Age: 0,
+			Arrived: now,
+			Departed: now.addDays(days)
+		});
+	} else if (&quot;ID&quot; in query || &quot;Name&quot; in query) // execute plugin
+		FLEX.runPlugin(req, function (ctx) {
+			// run engine using requested usecase via the job regulator 
+
+			//Log(&quot;run ctx&quot;, ctx);
+
+			if (!ctx) res(DEBE.errors.noContext);else if (isError(ctx)) res(ctx);else if (Pipe = ctx.Pipe) {
+				// intercept piped for learning workflows and to regulate event stream
+				res(&quot;Piped&quot;);
+
+				ctx.Host = host;
+
+				switch (Pipe.constructor) {
+					case String:
+						var fetchEvents = function fetchEvents(path, ctx, pipe, cb) {
+							//&lt; fetch events from path and place them in ctx keys defined by the pipe
+							DEBE.fetcher(path, null, function (info) {
+								// function evalEvents($,str) { return eval(str); }
+
+								Copy(info.parseJSON({}), ctx);
+								/*
+        var 
+        	evs = info.parseJSON({ });
+        
+        for (var key in pipe) ctx[key] = evalEvents( Copy(evs,$), pipe[key] || (&quot;$.&quot;+key) );
+        */
+
+								cb(ctx, pipe);
+							});
+						};
+
+						var pipe = {},
+						    chipper = HACK.chipVoxels,
+						    filename = Pipe.parsePath(pipe, {}, {}, {}),
+						    autoname = ctx.Host + &quot;.&quot; + ctx.Name;
+
+						sql.query(&quot;DELETE FROM openv.watches WHERE File != ? AND Run = ?&quot;, [filename, autoname]);
+
+						sql.query(&quot;INSERT INTO openv.watches SET ?&quot;, { // associate file with plugin
+							File: filename,
+							Run: autoname
+						}, function (err, info) {
+
+							if (!err) if (filename.charAt(0) == &quot;/&quot;) dogAutoruns(filename);
+						});
+
+						//Log(req.client, profile.QoS, profile.Credit, req.table, query);
+
+						if (filename.charAt(0) == &quot;/&quot;) // send source to the plugin
+							sql.insertJob({ // job descriptor for regulator
+								qos: 1, //profile.QoS, 
+								priority: 0,
+								client: req.client,
+								class: &quot;plugin&quot;,
+								credit: 100, // profile.Credit,
+								name: req.table,
+								task: query.Name || query.ID,
+								notes: [req.table.tag(&quot;?&quot;, { ID: query.ID }).tag(&quot;a&quot;, { href: &quot;/&quot; + req.table + &quot;.run&quot; }), (profile.Credit &gt; 0 ? &quot;funded&quot; : &quot;unfunded&quot;).tag(&quot;a&quot;, { href: req.url }), &quot;RTP&quot;.tag(&quot;a&quot;, {
+									href: &quot;/rtpsqd.view?task=&quot; + pipe.task
+								}), &quot;PMR brief&quot;.tag(&quot;a&quot;, {
+									href: &quot;/briefs.view?options=&quot; + pipe.task
+								})].join(&quot; || &quot;),
+								ctx: ctx,
+								pipe: pipe,
+								path: Pipe
+							}, function (job, sql) {
+								var ctx = job.ctx,
+								    pipe = job.pipe,
+								    path = job.path;
+
+								Log(&quot;pipe&quot;, path, pipe);
+								fetchEvents(path, ctx, pipe, function (evs, pipe) {
+									// fetch events and route them to plugin
+									pipePlugin(pipe, ctx, function (ctx) {
+										return saveEvents(ctx.Save, ctx);
+									});
+								});
+							});else // stream source through supervisor to the plugin
+							sql.forEach(TRACE, &quot;SELECT * FROM app.files WHERE Name LIKE ? &quot;, filename, function (file) {
+								// regulate requested file(s)
+
+								function chipFile(file, ctx) {
+
+									//Log( &quot;chip file&gt;&gt;&gt;&quot;, file );
+									ctx.File = file;
+									chipper(sql, pipe, function (voxctx) {
+										// process each voxel being chipped
+
+										sql.insertJob({ // job descriptor for regulator
+											qos: profile.QoS,
+											priority: 0,
+											client: req.client,
+											class: &quot;plugin&quot;,
+											credit: profile.Credit,
+											name: req.table,
+											task: query.Name || query.ID,
+											notes: [req.table.tag(&quot;?&quot;, { ID: query.ID }).tag(&quot;a&quot;, { href: &quot;/&quot; + req.table + &quot;.run&quot; }), (profile.Credit &gt; 0 ? &quot;funded&quot; : &quot;unfunded&quot;).tag(&quot;a&quot;, { href: req.url }), &quot;RTP&quot;.tag(&quot;a&quot;, {
+												href: &quot;/rtpsqd.view?task=&quot; + pipe.task
+											}), &quot;PMR brief&quot;.tag(&quot;a&quot;, {
+												href: &quot;/briefs.view?options=&quot; + pipe.task
+											})].join(&quot; || &quot;),
+											ctx: Copy(ctx, voxctx) // add engine context parms to the voxel run context
+										}, function (job, sql) {
+											// put voxel into job regulation queue
+
+											//Log(&quot;run job&quot;, job);
+
+											var ctx = job.ctx,
+											    file = ctx.File,
+											    supervisor = new RAN({ // learning supervisor
+												learn: function learn(supercb) {
+													// event getter callsback supercb(evs) or supercb(null,onEnd) at end
+													var supervisor = this;
+
+													//Log(&quot;learning ctx&quot;, ctx);
+
+													if (evs = ctx.Events) evs.$(&quot;group&quot;, function (evs) {
+														// get supervisor evs until null; then save supervisor computed events
+														Trace(evs ? &quot;SUPERVISING voxel&quot; + ctx.Voxel.ID + &quot; events &quot; + evs.length : &quot;SUPERVISED voxel&quot; + ctx.Voxel.ID, sql);
+
+														if (evs) // feed supervisor
+															supercb(evs);else // terminate supervisor and start engine
+															supercb(null, function onEnd(flow) {
+																// attach supervisor flow context
+																ctx.Flow = flow;
+																ctx.Case = &quot;v&quot; + ctx.Voxel.ID;
+																Trace(&quot;STARTING voxel&quot; + ctx.Voxel.ID, sql);
+
+																pipePlugin({}, ctx, function (ctx) {
+																	supervisor.end(ctx.Save || [], function (evstore) {
+																		saveEvents(evstore, ctx);
+																	});
+																});
+															});
+													});else // terminate supervisor
+														supercb(null);
+												},
+
+												N: pipe.actors || file._Ingest_Actors, // ensemble size
+												keys: pipe.keys || file.Stats_stateKeys, // event keys
+												symbols: pipe.symbols || file.Stats_stateSymbols || file._Ingest_States, // state symbols
+												steps: pipe.steps || file._Ingest_Steps, // process steps
+												batch: pipe.batch || 0, // steps to next supervised learning event 
+												//trP: {states: file._Ingest_States}, // trans probs
+												trP: {}, // transition probs
+												filter: function filter(str, ev) {
+													// filter output events
+													switch (ev.at) {
+														case &quot;batch&quot;:
+														//Log(&quot;filter&quot;, ev);
+														case &quot;config&quot;:
+														case &quot;end&quot;:
+															str.push(ev);
+													}
+												}
+											});
+
+											supervisor.pipe(function (stats) {
+												// pipe supervisor to this callback
+												Trace(&quot;PIPED voxel&quot; + ctx.Voxel.ID, sql);
+											});
+										});
+									});
+								}
+
+								[&quot;stateKeys&quot;, &quot;stateSymbols&quot;].parseJSON(file);
+
+								if (file._State_Archived) CP.exec(&quot;&quot;, function () {
+									// revise to add a script to cp from lts and unzip
+									Trace(&quot;RESTORING &quot; + file.Name);
+									sql.query(&quot;UPDATE app.files SET _State_Archived=false WHERE ?&quot;, { ID: file.ID });
+									chipFile(file, pipe);
+								});else chipFile(file, pipe);
+							});
+
+						break;
+
+					case Array:
+						// src contains event list
+						ctx.Events = Pipe;
+						pipePlugin({}, ctx, function (ctx) {
+							return saveEvents(null, ctx);
+						});
+						break;
+
+					case Object:
+						// src contains single event
+						break;
+				}
+			} else if (&quot;Save&quot; in ctx) // event generation engines do not participate in supervised workflow
+				res(saveEvents(ctx.Save, ctx));else res(&quot;ok&quot;);
+		});else if (engine = FLEX.execute[table]) // execute flex engine
+		engine(req, res);else if (DEBE.probono) // execute unregulated engine using query as usecase
+		ATOM.select(req, res);else res(DEBE.errors.noUsecase);
+}
+
+function sendDoc(req, res) {
+	var site = DEBE.site,
+	    master = &quot;http://localhost:8080&quot;,
+	    //site.urls.master,	
+	query = req.query,
+	    type = req.type.substr(1),
+	    name = req.table,
+	    docf = &quot;./temps/docs/&quot; + req.table + &quot;.&quot; + type;
+
+	res(&quot;Claim file &quot; + &quot;here&quot;.link(docf));
+
+	switch (type) {
+		case &quot;pdf&quot;:
+		case &quot;jpg&quot;:
+		case &quot;gif&quot;:
+
+			var url = (master + &quot;/&quot; + name + &quot;.view&quot;).tag(&quot;?&quot;, query),
+			    res = type != &quot;pdf&quot; ? &quot;1920px&quot; : &quot;&quot;;
+
+			Trace(&quot;SCRAPE &quot; + url);
+			CP.execFile(&quot;node&quot;, [&quot;phantomjs&quot;, &quot;rasterize.js&quot;, url, docf, res], function (err, stdout) {
+				if (err) Log(err, stdout);
+			});
+			break;
+
+		default:
+
+	}
+}
+
+function saveEvents(evs, ctx) {
+	var host = ctx.Host,
+	    client = &quot;guest&quot;,
+	    fileName = ctx.Host + &quot;.&quot; + ctx.Name;
+
+	//Log(&quot;saving&quot;, evs);
+
+	if (evs) switch (evs.constructor.name) {
+		case &quot;Error&quot;:
+			return evs + &quot;&quot;;
+
+		case &quot;Object&quot;:
+			// keys in the plugin context are used to create the stash
+			evs.ID = ctx.ID;
+			evs.Host = ctx.Host;
+			return &quot;save&quot;.$(evs, function (evs, sql) {
+				//Log(&quot;save ctx done&quot;);
+			});
+			break;
+
+		default:
+			return evs.$(ctx, function (evs, sql) {
+				// save events and callback with remaining unsaved evs
+
+				if (ctx.Export) {
+					// export remaining events to filename
+					var evidx = 0,
+					    srcStream = new STREAM.Readable({ // establish source stream for export pipe
+						objectMode: false,
+						read: function read() {
+							// read event source
+							if (ev = evs[evidx++]) // still have an event
+								this.push(JSON.stringify(ev) + &quot;\n&quot;);else // signal events exhausted
+								this.push(null);
+						}
+					});
+
+					DEBE.uploadFile(&quot;&quot;, srcStream, &quot;./stores/&quot; + fileName);
+				}
+
+				if (ctx.Ingest) // ingest remaining events
+					DEBE.getFile(client, fileName, function (fileID, sql) {
+						sql.query(&quot;DELETE FROM app.events WHERE ?&quot;, { fileID: fileID });
+
+						HACK.ingestList(sql, evs, fileID, function (aoi) {
+							Log(&quot;INGESTED&quot;, aoi);
+
+							DEBE.thread(function (sql) {
+								// autorun plugins linked to this ingest
+								exeAutorun(sql, &quot;&quot;, &quot;.&quot; + ctx.Host + &quot;.&quot; + ctx.Name);
+								sql.release();
+							});
+						});
+					});
+			});
+
+	} else return &quot;empty&quot;;
+}
+
+<span id='DEBE-End_Points-Skinning'>/**
+</span>@class DEBE.End_Points.Skinning
+*/
+
+function renderSkin(req, res) {
+<span id='DEBE-method-renderSkin'>	/**
+</span> @method renderSkin
+ @member DEBE
+ Totem (req,res)-endpoint to render req.table using its associated jade engine. 
+ @param {Object} req Totem request
+ @param {Function} res Totem response
+ */
+	var sql = req.sql,
+	    query = req.query,
+	    paths = DEBE.paths,
+	    site = DEBE.site,
+	    error = DEBE.errors,
+	    urls = site.urls,
+	    query = req.query,
+	    routers = DEBE.byActionTable.select,
+	    dsname = req.table,
+	    ctx = Copy(site, { //&lt; default site context to render skin
+		table: req.table,
+		dataset: req.table,
+		type: req.type,
+		//parts: req.parts,
+		action: req.action,
+		//org: req.org,
+		client: req.client,
+		flags: req.flags,
+		query: req.query,
+		joined: req.joined,
+		profile: req.profile,
+		group: req.group,
+		//search: req.search,
+		session: req.session,
+		/*
+  util: {
+  	cpu: (cpuavgutil() * 100).toFixed(0), // (req.log.Util*100).toFixed(0),
+  	disk: ((req.profile.useDisk / req.profile.maxDisk)*100).toFixed(0)
+  },*/
+		started: DEBE.started,
+		filename: DEBE.paths.jadePath, // jade compile requires
+		url: req.url
+	});
+
+	function dsContext(ds, cb) {
+		// callback cb(ctx) with skinning context ctx
+
+		if (ctxEx = DEBE.context[ds]) // render in extended context
+			sql.serialize(ctxEx, ctx, cb);else // render in default site context
+			cb(ctx);
+	}
+
+	dsContext(dsname, function (ctx) {
+		// get skinning context for this skin
+
+<span id='DEBE-Utilities-Skinning'>		/**
+</span>  @class DEBE.Utilities.Skinning
+  */
+		function renderFile(file, ctx) {
+<span id='DEBE-Utilities-Skinning-method-renderFile'>			/**
+</span>   @private
+   @method renderFile
+   Render Jade file at path this to res( err || html ) in a new context created for this request.  
+   **/
+			try {
+				res(JADE.renderFile(file, ctx));
+			} catch (err) {
+				res(err);
+			}
+		}
+
+		function renderPlugin(fields, ctx) {
+			// render using plugin skin
+<span id='DEBE-Utilities-Skinning-method-renderPlugin'>			/**
+</span>   @private
+   @method renderPlugin
+   Render Jade file at path this to res( err || html ) in a new context created for this request.  
+   **/
+
+			Copy({
+				mode: req.type,
+				page: query.page,
+				dims: query.dims || &quot;100%,100%&quot;,
+				ds: dsname
+			}, query);
+
+			//Log([query, req.search]);
+
+			var cols = [],
+			    drops = { id: 1, odbcstamp: 1 };
+
+			switch (fields.constructor) {
+				case Array:
+					fields.forEach(function (field, n) {
+						var key = field.Field,
+						    type = field.Type.split(&quot;(&quot;)[0];
+						//group = key.split(&quot;_&quot;);
+
+						if (key.toLowerCase() in drops) {// drop
+						} else if (type == &quot;geometry&quot;) {// drop
+						} else {
+							// take
+							var doc = escape(field.Comment).replace(/\./g, &quot;%2E&quot;),
+							    qual = &quot;short&quot;;
+
+							if (key.indexOf(&quot;Save&quot;) == 0) qual += &quot;hideoff&quot;;else if (key.charAt(0) == &quot;_&quot;) qual += &quot;off&quot;;
+
+							//Log(key,qual);
+							cols.push(key + &quot;.&quot; + type + &quot;.&quot; + doc + &quot;.&quot; + qual);
+						}
+					});
+					break;
+
+				case String:
+					fields.split(&quot;,&quot;).forEach(function (field) {
+						if (field != &quot;ID&quot;) cols.push(field);
+					});
+					break;
+
+				case Object:
+				default:
+					Each(fields, function (field) {
+						if (field != &quot;ID&quot;) cols.push(field);
+					});
+			}
+
+			query.cols = cols.groupify();
+			/*if ( query.mode == &quot;gbrief&quot; ) // better to add this to site.context.plugin
+   	sql.query(&quot;SELECT * FROM ??.??&quot;, [req.group, query.ds], function (err,recs) {
+   		if (err)
+   			res( DEBE.errors.badSkin );
+   		
+   		else {
+   			recs.each( function (n,rec) {
+   				delete rec.ID;
+   			});
+   				query.data = recs;
+   			pluginPath.render(req, res);
+   		}
+   	});
+   	else	*/
+
+			renderFile(paths.jades + &quot;plugin.jade&quot;, ctx);
+		}
+
+		function renderTable(ds, ctx) {
+<span id='DEBE-Utilities-Skinning-method-renderPlugin'>			/**
+</span>   @private
+   @method renderPlugin
+   Render table at path this to res( err || html ) in a new context created for this request.  
+   **/
+			sql.query(&quot;SHOW FULL COLUMNS FROM ??&quot;, sql.reroute(ds), function (err, fields) {
+
+				if (err) // render jade file
+					renderFile(paths.jades + ds + &quot;.jade&quot;, ctx);else // render plugin
+					renderPlugin(fields, ctx);
+			});
+		}
+
+		function renderJade(jade, ctx) {
+<span id='DEBE-Utilities-Skinning-method-renderJade'>			/**
+</span>   @private
+   @method renderJade
+   Render Jade string this to res( err || html ) in a new context created for this request. 
+   **/
+			try {
+				res(JADE.compile(jade, ctx)(ctx));
+			} catch (err) {
+				return res(err);
+			}
+		}
+
+		sql.forFirst(&quot;&quot;, paths.engine, { // Try a jade engine
+			Name: req.table,
+			Type: &quot;jade&quot;,
+			Enabled: 1
+		}, function (eng) {
+
+			if (eng) // render view with this jade engine
+				renderJade(eng.Code || &quot;&quot;, ctx);else if (route = routers[dsname]) // render ds returned by an engine 
+				route(req, function (recs) {
+					//Log({eng:recs, ds:req.table});
+					if (recs) renderPlugin(recs[0] || {}, ctx);else renderTable(dsname, ctx);
+				});else // render a table
+				renderTable(dsname, ctx);
+		});
+	});
+}
+
+<span id='DEBE-Utilities-Doc_Generation'>/**
+</span>@class DEBE.Utilities.Doc_Generation
+*/
+function genDoc(recs, req, res) {
+<span id='DEBE-Utilities-Doc_Generation-method-genDoc'>	/**
+</span> @method genDoc
+ Convert records to requested req.type office file.
+ @param {Array} recs list of records to be converted
+ @param {Object} req Totem request
+ @param {Function} res Totem response
+ */
+
+	if (!ODOC) return res(DEBE.errors.noOffice);
+
+	var types = {
+		xdoc: &quot;docx&quot;,
+		xxls: &quot;xlsx&quot;,
+		xppt: &quot;pptx&quot;,
+		xpps: &quot;ppsx&quot;
+	},
+	    type = types[req.type],
+	    docf = &quot;./temps/docs/&quot; + req.table + &quot;.&quot; + type;
+
+	if (type) {
+		res(&quot;Claim file &quot; + &quot;here&quot;.link(docf));
+
+		var docx = ODOC({
+			type: type
+			//onend: function (writeBytes) { 	}
+		}),
+		    docs = FS.createWriteStream(docf);
+
+		docx.generate(docs);
+		docs.on(&quot;close&quot;, function () {
+			Trace(&quot;CREATED &quot; + docf);
+		});
+
+		if (false) {
+			// debugging
+			var docp = docx.createP();
+			docp.addText(&quot;hello there&quot;);
+
+			docp.addTest(&quot;\nview || edit\n\n1.2 All my users\n\nID\tClient\tLikeus\tUpdated\tBanned\tLiked\tJoined\tSnapInterval\tSnapCount\tCharge\tCredit\tQoS\tTrusted\tCaptcha\tLogin\tEmail\tChallenge\tisHawk\tRequested\tApproved\tGroup\tuid\tgid\tUser\tJournal\tMessage\tIDs\tAdmin\tRepoll\tTimeout\tRoles\tStrength\n34\tbrian.james@guest.org\t0\tMon May 04 2015 05:52:50 GMT-0400 (EDT)\t\t1\tMon Sep 28 2015 20:51:50 GMT-0400 (EDT)\tnull\tnull\tnull\t0\t0\t0\t0\tnull\tnull\t0\t1\tnull\tnull\tapp\tnull\tnull\tbrian.james@guest.org\tnull\tnull\t{\&quot;Login\&quot;:\&quot;me\&quot;,\&quot;Password\&quot;:\&quot;test\&quot;,\&quot;FavColor\&quot;:\&quot;blue\&quot;}\tPlease contact joeschome to unlock your accout\t0\t30000\tPM,R,X\t1\n\nTotem\n\n\n{\&quot;a\&quot;:[{\&quot;ID\&quot;:0,\&quot;SORN\&quot;:\&quot;TBD\&quot;,\&quot;SPID\&quot;:\&quot;TBD\&quot;}],\&quot;b\&quot;:[{\&quot;ID\&quot;:1,\&quot;NISTid\&quot;:\&quot;TBD\&quot;,\&quot;NISTtype\&quot;:\&quot;a1\&quot;},{\&quot;ID\&quot;:2,\&quot;NISTid\&quot;:\&quot;TBD\&quot;,\&quot;NISTtype\&quot;:\&quot;TBD\&quot;},{\&quot;ID\&quot;:3,\&quot;NISTtype\&quot;:\&quot;a2\&quot;}]}\n\n\nTBD\n\n1.1 SCOPE AND APPLICABILITY\n\nThis document applies to all NGA owned, controlled, outsourced, blah blah\n\n2. INFORMATION SYSTEM CATEGORIZATION\n\n2.1 INFORMATION TYPES\nChapter 1\n\nThe Lorenz Equations x2=0\n\nx\u02D9y\u02D9z\u02D9=\u03C3(y\u2212x)=\u03C1x\u2212y\u2212xz=\u2212\u03B2z+xy\n\nImpressive 'eh\n\nJ\u03B1(x)=\u2211m=0\u221E(\u22121)mm!\u0393(m+\u03B1+1)(x2)2m+\u03B1\nChapter 2\n&quot;);
+		}
+
+		var cols = [];
+		var rows = [cols];
+
+		recs.forEach(function (rec, n) {
+			if (n == 0) for (var key in rec) {
+				rows.push({
+					val: key,
+					opts: {
+						cellColWidth: 4261,
+						b: true,
+						sz: &quot;48&quot;,
+						shd: {
+							fille: &quot;7F7F7F&quot;,
+							themeFill: &quot;text1&quot;,
+							themeFillTint: &quot;80&quot;
+						},
+						fontFamily: &quot;Avenir Book&quot;
+					}
+				});
+			}var row = new Array();
+
+			rows.push(row);
+			for (var key in rec) {
+				row.push(rec[key]);
+			}
+		});
+
+		if (false) docx.createTable(rows, {
+			tableColWidth: 4261,
+			tableSize: 24,
+			tableColor: &quot;ada&quot;,
+			tableAlign: &quot;left&quot;,
+			tableFontFamily: &quot;Comic Sans MS&quot;,
+			borders: true
+		});
+	} else res(DEBE.errors.badOffice);
+}
+
+<span id='DEBE-End_Points-System'>/**
+</span>@class DEBE.End_Points.System
+service maintenance endpoints
+*/
+
+function sysIngest(req, res) {
+<span id='DEBE-End_Points-System-method-sysIngest'>	/**
+</span> @method sysIngest
+ Totem (req,res)-endpoint to ingest a source into the sql database
+ @param {Object} req Totem request
+ @param {Function} res Totem response
+ */
+
+	var sql = req.sql,
+	    query = req.query,
+	    body = req.body,
+	    src = query.src,
+	    fileID = query.fileID;
+
+	Log(&quot;INGEST&quot;, query, body);
+	res(&quot;ingesting&quot;);
+
+	if (fileID) {
+		//sql.query(&quot;DELETE FROM app.events WHERE ?&quot;, {fileID: fileID});
+
+		if (onIngest = DEBE.onIngest[src]) // use builtin ingester
+			DEBE.ingester(onIngest, query, function (evs) {
+				HACK.ingestList(sql, evs, fileID, function (aoi) {
+					Log(&quot;INGEST aoi&quot;, aoi);
+				});
+			});else // use custom ingester
+			sql.query(&quot;SELECT _Ingest_Script FROM app.files WHERE ? AND _Ingest_Script&quot;, { ID: fileID }).on(&quot;results&quot;, function (file) {
+				if (onIngest = JSON.parse(file._Ingest_Script)) DEBE.ingester(onIngest, query, function (evs) {
+					HACK.ingestList(sql, evs, fileID, function (aoi) {
+						Log(&quot;INGEST aoi&quot;, aoi);
+					});
+				});
+			});
+	}
+}
+
+function sysAgent(req, res) {
+<span id='DEBE-End_Points-System-method-sysAlert'>	/**
+</span> @method sysAlert
+ Totem (req,res)-endpoint to send notice to outsource jobs to agents.
+ @param {Object} req Totem request
+ @param {Function} res Totem response
+ */
+
+	var sql = req.sql,
+	    query = req.query;
+
+	if (push = query.push) CRYPTO.randomBytes(64, function (err, jobid) {
+
+		try {
+			var args = JSON.parse(query.args);
+		} catch (parserr) {
+			err = parserr;
+		}
+
+		if (err) res(&quot;&quot;);else res(jobid.toString(&quot;hex&quot;));
+	});else if (pull = query.pull) {
+		var jobid = query.jobid;
+
+		if (jobid) res({ result: 123 });else res(&quot;Missing jobid&quot;);
+	} else if (flush = query.flush) ATOM.matlab.flush(sql, flush);else if (thread = query.load) {
+		var parts = thread.split(&quot;_&quot;),
+		    id = parts.pop(),
+		    plugin = &quot;app.&quot; + parts.pop(),
+		    results = ATOM.matlab.path.save + thread + &quot;.out&quot;;
+
+		Log(&quot;SAVE MATLAB&quot;, query.save, plugin, id, results);
+
+		FS.readFile(results, &quot;utf8&quot;, function (err, json) {
+
+			sql.query(&quot;UPDATE ?? SET ? WHERE ?&quot;, [plugin, { Save: json }, { ID: id }], function (err) {
+				Log(&quot;save&quot;, err);
+			});
+		});
+	} else if (thread = query.save) {
+		var Thread = thread.split(&quot;.&quot;),
+		    Thread = {
+			case: Thread.pop(),
+			plugin: Thread.pop(),
+			client: Thread.pop()
+		};
+
+		sql.forFirst(&quot;agent&quot;, &quot;SELECT * FROM openv.agents WHERE ? LIMIT 1&quot;, { queue: thread }, function (agent) {
+
+			if (agent) {
+				sql.query(&quot;DELETE FROM openv.agents WHERE ?&quot;, { ID: agent.ID });
+
+				if (evs = JSON.parse(agent.script)) FLEX.getContext(sql, &quot;app.&quot; + Thread.plugin, { ID: Thread.case }, function (ctx) {
+					res(saveEvents(evs, ctx));
+				});else res(DEBE.errors.badAgent);
+			} else res(DEBE.errors.badAgent);
+		});
+	} else res(DEBE.errors.badAgent);
+}
+
+function sysAlert(req, res) {
+<span id='DEBE-End_Points-System-method-sysAlert'>	/**
+</span> @method sysAlert
+ Totem (req,res)-endpoint to send notice to all clients
+ @param {Object} req Totem request
+ @param {Function} res Totem response
+ */
+	if (IO = DEBE.IO) IO.sockets.emit(&quot;alert&quot;, { msg: req.query.msg || &quot;system alert&quot;, to: &quot;all&quot;, from: DEBE.site.title });
+
+	res(&quot;Broadcasting alert&quot;);
+}
+
+function sysStop(req, res) {
+<span id='DEBE-End_Points-System-method-sysStop'>	/**
+</span> @method sysStop
+ Totem (req,res)-endpoint to send emergency message to all clients then halt totem
+ @param {Object} req Totem request
+ @param {Function} res Totem response
+ */
+	if (IO = DEBE.IO) IO.sockets.emit(&quot;alert&quot;, { msg: req.query.msg || &quot;system halted&quot;, to: &quot;all&quot;, from: DEBE.site.title });
+
+	res(&quot;Server stopped&quot;);
+	process.exit();
+}
+
+<span id='DEBE-Utilities-Startup_and_Initialization'>/**
+</span>@class DEBE.Utilities.Startup_and_Initialization
+*/
+function Initialize(sql) {
+<span id='DEBE-method-Initialize'>	/**
+</span> @method Initialize
+ @member DEBE
+ Initialize DEBE on startup.
+ */
+
+	function initSES(cb) {
+<span id='DEBE-method-initSES'>		/**
+</span>   * @method initSES
+   * @private
+   * @member DEBE
+   * Initialize the session environment
+   */
+
+		Trace(&quot;INIT SESSIONS&quot;);
+
+		/*
+  Each( CRUDE, function (n,routes) { // Map engine CRUD to DEBE workers
+  	DEBE.byTable[n] = ATOM[n];
+  });	
+  */
+
+		/*
+  The i18n simply provides an industry standard framework for translating native -&gt; foreign
+  phrases (defined my pot-&gt;po files under XLATE folder).  These pot-&gt;po translations are 
+  not free.  Wordpress, for example, provides a service that allows websites to register
+  for their services that crowd source translations from supplied pot files to their
+  delivered po files.
+  */
+
+		if (path = DEBE.paths.mime.xlate) EXAPP.use(LANG.abide({
+			supported_languages: ['en', 'de', 'fr'],
+			default_lang: 'en',
+			translation_directory: path,
+			translation_type: &quot;json&quot;
+			//locale_on_url: true
+		}));
+
+		if (cb) cb();
+	}
+
+	function initENV(cb) {
+<span id='DEBE-method-initENV'>		/**
+</span>   * @method initENV
+   * @private
+   * @member DEBE
+   * Initialize the runtime environment
+   */
+
+		Trace(&quot;INIT ENVIRONMENT&quot;);
+
+		var site = DEBE.site,
+		    args = ARGP.usage(&quot;$0 [options]&quot;).default('spawn', DEBE.isSpawned).boolean('spawn').describe('spawn', 'internal hyper-threading option').check(function (argv) {
+			DEBE.isSpawned = argv.spawn;
+		}).default('blind', DEBE.blindTesting).boolean('blind').describe('blind', 'internal testing flag').check(function (argv) {
+			DEBE.blindTesting = argv.blind;
+		}).default('dump', false).boolean('dump').describe('dump', 'display derived site parameters').check(function (argv) {
+			//Log(site);
+		})
+
+		/*
+  .default('start',DEBE.site.Name)
+  .describe('start','service to start')  
+  .check(function (argv) {
+  	DEBE.site.Name = argv.start;
+  })
+  * */
+
+		.boolean('version').describe('version', 'display current version').check(function (argv) {
+			if (argv.version) Trace(DEBE.site);
+		})
+
+		/*
+  .default('echo',DEBE.FLAGS.DEBUG)
+  .boolean('echo')
+  .describe('echo','echo adjusted http request parameters')
+  .check(function(argv) {
+  	DEBE.FLAGS.DEBUG = argv.echo;
+  })*/
+
+		.boolean('help').describe('help', 'display usage help').check(function (argv) {
+			if (argv.help) {
+				Trace(ARGP.help());
+
+				Trace(&quot;Available services:&quot;);
+				sql.query(&quot;SELECT * FROM openv.apps WHERE ?&quot;, { Enabled: 1 }).on(&quot;result&quot;, function (app) {
+					Trace(app.Name + &quot; v&quot; + app.Ver + &quot; url=&quot; + app.Host + &quot;:&quot; + app.Port + &quot; db=&quot; + app.DB + &quot; nick=&quot; + app.Nick + &quot; sockted=&quot; + (app.Sockets ? &quot;yes&quot; : &quot;no&quot;) + &quot; cores=&quot; + app.Cores + &quot; pki=&quot; + app.PKI);
+				}).on(&quot;error&quot;, function (err) {
+					Trace(err);
+				}).on(&quot;end&quot;, function () {
+					process.exit();
+				});
+			}
+		}).argv;
+
+		if (cb) cb();
+	}
+
+	function initSQL(cb) {
+<span id='DEBE-method-initSQL'>		/**
+</span>   * @method initSQL
+   * @private
+   * @member DEBE
+   * Initialize the FLEX and ATOM interfaces
+   */
+
+		Trace(&quot;INIT CRUDE&quot;);
+		for (crude in { select: 1, delete: 1, insert: 1, update: 1, execute: 1 }) {
+			//DEBE[crude] = FLEX[crude].ds;
+			DEBE.byActionTable[crude] = FLEX[crude];
+		}
+
+		if (cb) cb();
+	}
+
+	initENV(function () {
+		// init the global environment
+		initSES(function () {
+			// init session handelling
+			initSQL(function () {
+				// init the sql interface
+
+				Trace(&quot;INIT MODULES&quot;);
+
+				FLEX.config({
+					thread: Thread,
+					//emitter: DEBE.IO ? DEBE.IO.sockets.emit : null,
+					skinner: JADE,
+					fetcher: DEBE.fetcher,
+					indexer: DEBE.indexFile,
+					createCert: DEBE.createCert,
+
+					diag: DEBE.diag,
+
+					site: DEBE.site // Site parameters
+
+				});
+
+				HACK.config({
+					//source: &quot;&quot;,
+					taskPlugin: null,
+					thread: DEBE.thread
+				});
+
+				$.config({
+					thread: DEBE.thread,
+					tasker: DEBE.tasker
+				});
+
+				ATOM.config({
+					thread: DEBE.thread,
+					cores: DEBE.cores,
+					//watchFile: DEBE.watchFile,
+					plugins: Copy({ // share selected FLEX and other modules with engines
+						// MAIL: FLEX.sendMail,
+						RAN: require(&quot;randpr&quot;),
+						$: $
+						/*TASK: {
+      	shard: DEBE.tasker
+      }, */
+					}, $)
+				});
+
+				JAX.config({
+					MathJax: {
+						tex2jax: {
+							//displayMath: [[&quot;$$&quot;,&quot;$$&quot;]]
+						}
+					}
+				});
+				JAX.start();
+
+				DEBE.onStartup(sql);
+
+				var path = DEBE.paths.jades;
+
+				if (false) DEBE.indexFile(path, function (files) {
+					// publish new engines
+					var ignore = { &quot;.&quot;: true, &quot;_&quot;: true };
+					files.forEach(function (file) {
+						if (!ignore[file.charAt(0)]) try {
+							Trace(&quot;PUBLISHING &quot; + file);
+
+							sql.query(&quot;REPLACE INTO app.engines SET ?&quot;, {
+								Name: file.replace(&quot;.jade&quot;, &quot;&quot;),
+								Code: FS.readFileSync(path + file, &quot;utf-8&quot;),
+								Type: &quot;jade&quot;,
+								Enabled: 0
+							});
+						} catch (err) {
+							//Trace(err);
+						}
+					});
+
+					sql.release();
+				});
+			});
+		});
+	});
+}
+
+//====================== extend objects
+
+[// string prototypes
+// string serializers callback cb(html) with tokens replaced
+
+function Xblog(req, ds, cache, ctx, rec, viaBrowser, cb) {
+<span id='String-method-'>	/**
+</span> @member String
+ Expands markdown of the form:
+ 	
+ 	[ post ] ( SKIN.view ? w=WIDTH &amp; h=HEIGHT &amp; x=BASE$X &amp; y=BASE$Y &amp; OPTS ) || BASE,X,Y &gt;= SKIN,WIDTH,HEIGHT,OPTS  
+ 	[ image ] ( PATH.jpg ? w=WIDTH &amp; h=HEIGHT )  
+ 	[ LINK ]( URL )  ||  [ FONT ]( TEXT )  ||  [ ]( URL )  ||  [TOPIC]( )  
+ 	$$ inline TeX $$  ||  n$$ break TeX $$ || a$$ AsciiMath $$ || m$$ MathML $$ || [#EXPR || TeX] OP= [#EXPR || TeX]  
+ 	\${ KEY } || \${ EXPR } || \${doc( EXPR , &quot;IDX, ...&quot; )}  
+ 	KEY &lt;= VALUE || OP &lt;= EXPR(lhs),EXPR(rhs)  
+ 	
+ using the supplifed cache to get/put KEY values, as well as block-escaping:
+ 			
+ 	HEADER:
+ 			BLOCK
+ 	and markdown scripting:
+ 		MARKDOWN
+ 	script:
+ 	MATLAB EMULATION SCRIPT
+ 	
+ @param {Object} req Totem request
+ @param {String} ds dataset name for 
+ @param {Object} cache hash for cacheing markdown variables
+ @param {Object} ctx hash holding markdown variables
+ @param {Obect} rec record hash for markdown variables
+ @param {Boolean} viaBrowser true to render markdown to browser
+ @param {Function} cb callback(markdown html)
+ */
+
+	for (var key in rec) {
+		try {
+			ctx[key] = JSON.parse(rec[key]);
+		} catch (err) {
+			ctx[key] = rec[key];
+		}
+	}var blockidx = 0;
+
+	function docify(obj, idx) {
+		var doc = {};
+
+		if (keys = idx ? idx.split(&quot;,&quot;) : null) keys.forEach(function (key) {
+			if (key in obj) doc[key] = obj[key];
+		});else doc = obj;
+
+		return (JSON.stringify(doc) || &quot;&quot;).replace(/ /g, &quot;&quot;).replace(/_/g, &quot;&quot;).replace(/^/g, &quot;&quot;);
+	}
+
+	Copy({
+		d: docify,
+		doc: docify
+	}, ctx);
+
+	this.Xescape([], function (blocks, html) {
+		return (// excape code blocks
+			html.Xscript(ctx, function (ctx, md) {
+				return (// script expanded markdown 
+					md.Xgen(ctx).Xtex(function (html) {
+						return (// TeX expanded markdown
+							html.Xlink(req, ds, viaBrowser, function (html) {
+								// link expanded markdown
+
+								cb(html
+								// make links smart
+								.replace(/href=(.*?)\&gt;/g, function (str, ref) {
+									// follow &lt;a href=REF&gt;A&lt;/a&gt; links
+									var q = ref.charAt(0) == &quot;'&quot; ? '&quot;' : &quot;'&quot;;
+									return &quot;href=&quot; + q + &quot;javascript:navigator.follow(&quot; + ref + &quot;,BASE.user.client,BASE.user.source)&quot; + q + &quot;&gt;&quot;;
+								})
+
+								// backsub escaped blocks
+								.replace(/@block/g, function (str) {
+									//Log(`unblock[${blockidx}]`, blocks[ blockidx].tag(&quot;code&quot;,{}) );
+									return blocks[blockidx++].tag(&quot;code&quot;, {});
+								}));
+							})
+						);
+					})
+				);
+			})
+		);
+	});
+}, function Xescape(blocks, cb) {
+	// escapes code blocks then callsback cb(blocks, html)
+	var key = &quot;@esc&quot;,
+	    html = this,
+	    fetchBlock = function fetchBlock(rec, cb) {
+		// callsback cb with block placeholder
+		//Log(`block[${blocks.length}] `, rec.url);
+		blocks.push(rec.opt);
+		cb(rec.url + &quot;:&quot; + &quot;@block&quot;);
+	},
+	    pattern = /\n(.*)\:\n\n((.|\n)*)\n\n/g; // define escaped code block
+
+	html.serialize(fetchBlock, pattern, key, function (html, fails) {
+		cb(blocks, html);
+	});
+}, function Xdummy(cb) {
+	// for debugging with callback(this)
+	cb(this);
+}, function Xlink(req, ds, viaBrowser, cb) {
+	// expands [LINK](URL) tags then callsback cb( final html )
+	var key = &quot;@tag&quot;,
+	    html = this,
+	    fetcher = DEBE.fetcher,
+	    fetchTopic = function fetchTopic(rec, cb) {
+		// callback cb with expanded [TOPIC]() markdown
+		var secret = &quot;&quot;,
+		    topic = rec.url,
+		    product = topic + &quot;.html&quot;;
+
+		FLEX.licenseCode(req.sql, html, { // register this html with the client
+			_Partner: req.client,
+			_EndService: &quot;&quot;, // leave empty so lincersor wont validate by connecting to service
+			_Published: new Date(),
+			_Product: product,
+			Path: &quot;/tag/&quot; + product
+		}, function (pub) {
+			cb((rec.url + &quot;=&gt;&quot; + (pub ? req.client : &quot;guest&quot;)).tag(&quot;a&quot;, { href: &quot;/tags.view&quot; }));
+		});
+	},
+	    fetchSite = function fetchSite(rec, cb) {
+		// callback cb with expanded [](URL) markdown
+		//Log(&quot;solicit&quot;, rec, viaBrowser);
+		if (viaBrowser) cb(&quot;&quot;.tag(&quot;iframe&quot;, { src: rec.opt }));else fetcher(rec.opt, null, function (html) {
+			return cb;
+		});
+	},
+	    fetchTag = function fetchTag(rec, cb) {
+		// callback cb with expanded [LINK](URL) markdown
+		var keys = {},
+		    opt = rec.url,
+		    url = rec.opt,
+		    dsPath = ds.parsePath(keys, {}, {}, {}),
+		    srcPath = url.parsePath(keys, {}, {}, {}) || dsPath,
+		    w = keys.w || 100,
+		    h = keys.h || 100,
+		    srcPath = srcPath.tag(&quot;?&quot;, Copy({ src: dsPath }, keys));
+
+		//Log(&quot;tag&quot;,rec, dsPath, keys, srcPath);
+
+		switch (opt) {
+			case &quot;image&quot;: //[image](URL)
+			case &quot;img&quot;:
+				cb(&quot;&quot;.tag(&quot;img&quot;, { src: srcPath, width: w, height: h }));
+				break;
+
+			case &quot;post&quot;: // [post](URL)
+			case &quot;iframe&quot;:
+				cb(&quot;&quot;.tag(&quot;iframe&quot;, { src: srcPath, width: w, height: h }));
+				break;
+
+			case &quot;R&quot;: // [FONT](TEXT)
+			case &quot;B&quot;:
+			case &quot;G&quot;:
+			case &quot;Y&quot;:
+			case &quot;O&quot;:
+			case &quot;K&quot;:
+			case &quot;red&quot;:
+			case &quot;blue&quot;:
+			case &quot;green&quot;:
+			case &quot;yellow&quot;:
+			case &quot;orange&quot;:
+			case &quot;black&quot;:
+				cb(url.tag(&quot;font&quot;, { color: opt }));
+				break;
+
+			case &quot;&quot;: // []( URL ) || [fetch](URL)
+			case &quot;fetch&quot;:
+				fetchSite(rec, cb);
+				break;
+
+			default:
+				if (url) // [LINK](URL)
+					cb(opt.tag(&quot;a&quot;, { href: url }));else // [TOPIC]()
+					fetchTopic(rec, cb);
+		}
+	},
+	    pattern = /\[([^\[\]]*)\]\(([^\)]*)\)/g;
+
+	html.serialize(fetchTag, pattern, key, function (html, fails) {
+		cb(html);
+	});
+}, function Xscript(ctx, cb) {
+	// expands scripting tags then callsback cb(vmctx, final markdown)
+	var script = &quot;&quot;,
+	    pattern = /script:\n((.|\n)*)/g,
+	    // defines MARKDOWN\nscript:\SCRIPT tag pattern
+	run = this.replace(pattern, function (str, xscript) {
+		script = xscript;
+		return &quot;&quot;;
+	});
+
+	if (script) try {
+		$(script, ctx, function (vmctx) {
+			cb(vmctx, run);
+		});
+	} catch (err) {
+		cb(ctx, err + &quot;&quot;);
+	} else cb(ctx, run);
+}, function Xgen(ctx) {
+	// expands LHS OP= RHS tags
+
+	var genctx = Copy(DEBE.blog, new Object(ctx)),
+	    pattern = /(\S*) ([^ ]*)= (\S*)/g; // defines LHS OP= RHS tag
+
+	return this.parseJS(genctx).replace(pattern, function (str, lhs, op, rhs) {
+		//Log([lhs,rhs,op]);
+		if (op) {
+			if (blogOp = genctx[op]) {
+				if (isFunction(blogOp)) return blogOp(lhs, rhs, genctx);else return &quot;invalid lhs &quot; + op + &quot;= rhs markdown&quot;;
+			} else return &quot;invalid lhs &quot; + op + &quot;= rhs markdown&quot;;
+		} else return lhs + &quot; = &quot; + rhs;
+	});
+}, function Xtex(cb) {
+	// expands X$$ MATH $$ tags then callbacks cb( final html )
+	var key = &quot;@tex&quot;,
+	    html = this,
+	    fetcher = JAX.typeset,
+	    fetchInTeX = function fetchInTeX(rec, cb) {
+		// callsback cb with expanded inline TeX tag
+		//Log(&quot;math&quot;,rec);
+		fetcher({
+			math: rec.url,
+			format: &quot;inline-TeX&quot;,
+			//html: true,
+			mml: true
+		}, function (d) {
+			return cb(d.mml || &quot;&quot;);
+		});
+	},
+	    fetchTeX = function fetchTeX(rec, cb) {
+		// callsback cb with expanded TeX tag
+		//Log(&quot;math&quot;,rec);
+		fetcher({
+			math: rec.url,
+			format: &quot;TeX&quot;,
+			//html: true,
+			mml: true
+		}, function (d) {
+			return cb(d.mml || &quot;&quot;);
+		});
+	},
+	    fetchAscii = function fetchAscii(rec, cb) {
+		// callsback cb with expanded AsciiMath tag
+		//Log(&quot;math&quot;,rec);
+		fetcher({
+			math: rec.url,
+			format: &quot;AsciiMath&quot;, // TeX, inline-TeX, AsciiMath, MathML
+			//html: true,
+			mml: true
+		}, function (d) {
+			return cb(d.mml || &quot;&quot;);
+		});
+	},
+	    pattern = { // define tag patterns
+		ascii: /a\$\$([\$!]*)\$\$/g, // a$$ ascii math $$
+		tex: /n\$\$([^\$]*?)\$\$/g, // n$$ new line TeX $$
+		intex: /\$\$([^\$]*?)\$\$/g // $$ inline Tex $$
+	};
+
+	html.serialize(fetchAscii, pattern.ascii, key, function (html, fails) {
+		html.serialize(fetchTeX, pattern.tex, key, function (html, fails) {
+			html.serialize(fetchInTeX, pattern.intex, key, function (html, fails) {
+				cb(html);
+			});
+		});
+	});
+}, function Xparms(product, cb) {
+	// expands &lt;!---parms KEY=VAL&amp;...---&gt; tags then callbacks cb( final input-scripted html )
+	var pattern = /&lt;!---parms ([^&gt;]*)?---&gt;/g;
+
+	cb(this.replace(pattern, function (str, parms) {
+
+		var inputs = [],
+		    keys = [];
+
+		parms.split(&quot;&amp;&quot;).forEach(function (parm) {
+			parm.replace(/([^=]*)?=(.*)?/, function (str, key, val) {
+				inputs.push(key + &quot;: &lt;input id=\&quot;parms.&quot; + key + &quot;\&quot; type=\&quot;text\&quot; value=\&quot;&quot; + val + &quot;\&quot; autofocus &gt;&quot;);
+				keys.push('&quot;' + key + '&quot;');
+				return &quot;&quot;;
+			});
+			return &quot;&quot;;
+		});
+
+		return &quot;\n&lt;script&gt;\n\tString.prototype.tag = &quot; + &quot;&quot;.tag + &quot;\n\tfunction submitForm() {\n\t\tvar parms = {};\n\t\t[&quot; + keys + &quot;].forEach( (key) =&gt; parms[key] = document.getElementById(\&quot;parms.\&quot;+key).value );\n\n\t\twindow.open( \&quot;/&quot; + product + &quot;\&quot;.tag(\&quot;?\&quot;, parms) );\n\t}\n&lt;/script&gt;\n&lt;form onsubmit=\&quot;submitForm()\&quot;&gt;\n\t&quot; + inputs.join(&quot;&quot;) + &quot;\n\t&lt;button id=\&quot;parms.submit\&quot; type=\&quot;submit\&quot; value=\&quot;submit\&quot;&gt;submit&lt;/button&gt;\n&lt;/form&gt;\n&quot;;
+	}));
+}, function Xfetch(cb) {
+	// expands &lt;!---fetch URL---&gt; tags then callsback cb( final url-fetched html )
+	var key = &quot;@fetch&quot;,
+	    fetcher = DEBE.fetcher,
+	    fetchSite = function fetchSite(rec, cb) {
+		// callsback cb with expanded fetch-tag 
+		fetcher(rec.url, null, cb);
+	},
+	    pattern = /&lt;!---fetch ([^&gt;]*)?---&gt;/g;
+
+	this.serialize(fetchSite, pattern, key, function (html, fails) {
+		return cb(html);
+	});
+}, function Xjade(ctx, proxy, product, cb) {
+	// returns product's ToU via a proxy site
+
+	var url = URL.parse(proxy || &quot;&quot;),
+	    host = proxy ? url.host.split(&quot;.&quot;)[0] : null,
+	    md = this,
+	    //proxy ? this : this.replace(/\*\*Owner\*\*/g,`**Owner** (${req.client})`),
+	header = proxy ? &quot;img(src=\&quot;/shares/images/&quot; + host + &quot;.jpg\&quot;, width=\&quot;100%\&quot;, height=\&quot;15%\&quot;)&quot; : &quot;p&quot;,
+	    jade = &quot;:markdown\n\t&quot; + md.replace(/\n/g, &quot;\n\t&quot;);
+	/*jade = `extends layout
+ append layout_parms
+ - math = false
+ append layout_body
+ ${header}
+ :markdown
+ `  + md.replace(/\n/g,&quot;\n\t\t&quot;);*/
+
+	//Log(jade);
+	ctx.filename = DEBE.paths.jadePath;
+
+	try {
+		JADE.compile(jade, ctx)(ctx).Xparms(product, cb);
+	} catch (err) {
+		cb(err + &quot;&quot;);
+	}
+}].extend(String);
+
+[// array prototypes
+function groupify() {
+	return this.splitify(&quot;_&quot;).joinify();
+}, function clone() {
+	/*
+ @member Array
+ @method clone
+ Return a cloned copy of this records
+ */
+
+	var recs = this,
+	    copyRecs = [];
+	recs.forEach(function (rec) {
+		// clone ds recs
+		copyRecs.push(new Object(rec));
+	});
+	return recs;
+}, function blogify(req, key, ds, cb) {
+	/*
+ @member Array
+ @method blogify
+ @param [List] keys list of keys to blogify
+ @param [String] ds Name of dataset being blogged
+ @param [Function] cb callback(recs) blogified version of records
+ */
+	var sql = req.sql,
+	    recs = this;
+
+	var fetchBlog = function fetchBlog(rec, cb) {
+		//Log(&quot;blog&quot;, key, rec);
+		if (md = rec[key] + &quot;&quot;) md.Xblog(req, ds + &quot;?id=&quot; + rec.ID, {}, {}, rec, true, function (html) {
+			return cb(html);
+		});else cb(md);
+	};
+
+	recs.serialize(fetchBlog, function fb(rec, blog) {
+		if (rec) rec[key] = blog;else cb(recs);
+	});
+}, function isEmpty() {
+	return this.length == 0;
+}, function stashify(watchKey, targetPrefix, ctx, stash, cb) {
+	/*
+ @member Array
+ @method stashify
+ @param [String] watchKey  this = [ { watchKey:&quot;KEY&quot;, x:X, y: Y, ...}, ... }
+ @param [String] targetPrefix  stash = { (targetPrefix + watchKey): { x: [X,...], y: [Y,...], ... }, ... } 
+ @param [Object] ctx plugin context keys
+ @param [Object] stash refactored output suitable for a Save_KEY
+ @param [Function] cb callback(ev,stat) returns refactored result to put into stash
+ Used by plugins for aggregating ctx keys into optional Save_KEY stashes such that:
+ 			[	{ at: &quot;check&quot;, A: a1, B: b1, ... }, { at: &quot;check&quot;, A: a1, B: b1, ... }, ... 
+ 			{ at: &quot;other&quot;, ...}, { x:x1, y:y1, ...}, { x:x2: y:y2, ... } 
+ 		].stashify( &quot;at&quot;, &quot;save_&quot;, {save_check: {}, ...} , stash, cb )
+ 	creates a stash.save_check = {A: [a1, a2,  ...], B: [b1, b2, ...], ...}.   No stash.other is
+ created because its does not exist in the supplied ctx.  If no stash.rem is provided 
+ by the ctx, the {x, y, ...} are appended (w/o aggregation) to stash.remainder. Conversely, 
+ had	the ctx contain a stash.rem, the {x, y, ...} would be aggregated to stash.rem.
+ */
+
+	var rem = stash.remainder;
+
+	this.forEach(function (stat, n) {
+		// split-save all stashable keys
+		var key = targetPrefix + (stat[watchKey] || &quot;rem&quot;),
+		    // target ctx key 
+		ev = key in stash ? stash[key] // stash was already primed
+		: key in ctx ? // see if its in the ctx
+		stash[key] = cb(null, stat, ctx[key]) // prime stash
+		: null; // not in ctx so stash in remainder
+
+		if (ev) {
+			// found a ctx target key to save results
+			delete stat[watchKey];
+			cb(ev, stat);
+		} else if (rem) // stash remainder 
+			rem.push(stat);
+	});
+}, function merge(Recs, idx) {
+<span id='Array-method-merge'>	/**
+</span> @member Array
+ @method merge
+ @param [Array] Recs Source records to merge into this records
+ @param [String] idx Key name to use for detecting record changes
+ Merge changes when doing table deltas from their baseline versions.
+ **/
+
+	function changed(rec, Rec) {
+		for (var n in rec) {
+			if (rec[n] != Rec[n]) return true;
+		}return false;
+	}
+
+	var recs = this;
+	// sort records on specified index
+	Recs = Recs.sort(function (a, b) {
+		return a[idx] &gt; b[idx] ? 1 : -1;
+	});
+	recs = recs.sort(function (a, b) {
+		return a[idx] &gt; b[idx] ? 1 : -1;
+	});
+
+	// merge records based on specified index.
+	var k = 0,
+	    Rec = Recs[k],
+	    ID = 10000;
+
+	if (Rec) recs.forEach(function (rec, n) {
+		//Log([n,k,recs.length, Recs.length, idx, rec[idx], Rec[idx]]);
+
+		while (Rec &amp;&amp; rec[idx] == Rec[idx]) {
+			if (changed(rec, Rec)) {
+				// return only changed records
+				Rec.Baseline = 1;
+				Rec.ID = ID++;
+				recs.push(Rec);
+			}
+			Rec = Recs[++k];
+		}
+
+		rec.Baseline = 0;
+	});
+
+	recs = recs.sort(function (a, b) {
+		return a[idx] &gt; b[idx] ? 1 : -1;
+	});
+
+	return recs;
+}, function treeify(idx, kids, level, keys, wt) {
+<span id='Array-method-treeify'>	/**
+</span> @member Array
+ @method treeify
+ @param [Number] idx starting index (0 on first call)
+ @param [Number] kids number of leafs following starting index (this.length on first call)
+ @param [Number] level current depth (0 on first call)
+ @param [Array] keys pivot keys
+ @param [String] wt key name that contains leaf weight (defaults to &quot;size&quot;)
+ Return a tree = {name,weight,children: tree} from records having been sorted on keys=[key,...]
+ */
+	var recs = this,
+	    key = keys[level],
+	    len = 0,
+	    pos = idx,
+	    end = idx + kids,
+	    tar = [];
+
+	//Log([level,keys,ref,idx]);
+
+	if (key) for (var ref = recs[idx][key]; pos &lt; end;) {
+		var rec = recs[idx];
+		var stop = idx == end ? true : rec[key] != ref;
+
+		if (stop) {
+			//Log([pos,idx,end,key,ref,recs.length]);
+
+			var node = {
+				name: key + &quot; &quot; + ref,
+				size: wt ? parseInt(rec[wt] || &quot;0&quot;) : len,
+				children: recs.treeify(pos, len, level + 1, keys, wt)
+			};
+
+			tar.push(node);
+			pos = idx;
+			len = 0;
+			ref = idx == end ? null : recs[idx][key];
+		} else {
+			idx++;
+			len++;
+		}
+	} else while (pos &lt; end) {
+		var rec = recs[pos++];
+		tar.push({
+			name: &quot;doc&quot;,
+			size: 10,
+			doc: rec
+		});
+	}
+
+	return tar;
+}, function sample(cb) {
+	/*
+ @member sample
+ @method Array
+ @param {Function} cb callback(rec) returns record results to append
+ Samples a record list:
+ 	[ {x:&quot;a&quot;}, {x:&quot;b&quot;} ].sample( (rec) =&gt; rec.x==&quot;a&quot; )
+ 
+ returning a record list:	
+ 	[ {x:&quot;a&quot;} ]
+ 	
+ using the callback cb(rec) which returns true/false to retain/drop an item.
+ */
+	var rtns = [];
+	this.forEach(function (rec) {
+		rtns.push(cb(rec));
+	});
+	return rtns;
+}, function joinify(cb) {
+	/*
+ @member Array
+ @method joinify
+ @param {Function} cb
+ Joins a list 
+ 	[	a: null,
+ 		g1: [ b: null, c: null, g2: [ x: null ] ],
+ 		g3: [ y: null ] ].joinify()
+ 
+ returning a string
+ 	&quot;a,g1(b,c,g2(x)),g3(y)&quot;
+ 		
+ where an optional callback cb(head,list) joins the current list with the current head.
+ */
+
+	var src = this,
+	    rtn = [];
+
+	Each(src, function (key, list) {
+		if (typeof list == &quot;string&quot;) rtn.push(list);else try {
+			rtn.push(cb ? cb(key, list) : key + &quot;(&quot; + list.joinify() + &quot;)&quot;);
+		} catch (err) {
+			rtn.push(list);
+		}
+	});
+
+	return cb ? cb(null, rtn) : rtn.join(&quot;,&quot;);
+}, function splitify(dot) {
+	/*
+ @member Array
+ @method splitify
+ @param {String} dot
+ Splits a list 
+ 	[&quot;a&quot;, &quot;g1.b&quot;, &quot;g1.c&quot;, &quot;g1.g2.x&quot;, &quot;g3.y&quot;].splitify( &quot;.&quot; )
+ 	
+ returning a list
+ 	 [	a: null,
+ 		g1: [ b: null, c: null, g2: [ x: null ] ],
+ 		g3: [ y: null ] ]
+ 
+ */
+	var src = {};
+	this.forEach(function (key) {
+		src[key] = key;
+	});
+
+	return Copy(src, [], dot || &quot;.&quot;);
+}, function linkify(refs) {
+	/*
+ @member Array
+ @method linkify
+ @param {String} ref
+ Returns a ref-joined list of links
+ */
+	if (typeof refs == &quot;string&quot;) refs = refs.split(&quot;,&quot;);
+
+	var rtn = [];
+
+	this.forEach(function (label, index) {
+
+		var link = refs[index] || label.toLowerCase();
+
+		switch (link) {
+			case &quot;*&quot;:
+				rtn.push(label);
+				break;
+
+			default:
+				if (link.charAt(0) != &quot;/&quot;) {
+					link = &quot;/&quot; + link;
+					if (link.indexOf(&quot;.&quot;) &lt; 0) link += &quot;.view&quot;;
+				}
+				rtn.push(label.link(link));
+		}
+	});
+
+	return rtn.join(&quot; || &quot;);
+}, function gridify(noheader) {
+	//&lt; dump dataset as html table
+<span id='Array-method-gridify'>	/**
+</span> @member Array
+ @method gridify
+ @param {Boolean} noheader switch to enable header processing
+ */
+	function join(recs, sep) {
+		switch (recs.constructor) {
+			case Array:
+				return this.join(sep);
+
+			case Object:
+				var rtn = [];
+				for (var n in this) {
+					rtn.push(this[n]);
+				}return rtn.join(sep);
+
+			default:
+				return this;
+		}
+	}
+
+	function table(recs) {
+		// generate an html table from given data or object
+		switch (recs.constructor) {
+			case Array:
+				// [ {head1:val}, head2:val}, ...]  create table from headers and values
+
+				var rtn = &quot;&quot;,
+				    head = !noheader,
+				    heads = {};
+
+				recs.forEach(function (rec) {
+					Each(rec, function (key, val) {
+						heads[key] = key;
+					});
+				});
+
+				recs.forEach(function (rec) {
+
+					if (head) {
+						var row = &quot;&quot;;
+						Each(heads, function (key, val) {
+							row += key.tag(&quot;th&quot;);
+						});
+						rtn += row.tag(&quot;tr&quot;);
+						head = false;
+					}
+
+					var row = &quot;&quot;,
+					    intro = &quot;&quot;;
+					Each(heads, function (key, val) {
+						if (val = rec[key]) row += isArray(val) ? table(val) : (val + &quot;&quot;).tag(&quot;td&quot;, intro ? { class: &quot;intro&quot; } : {});else row += (val + &quot;&quot;).tag(&quot;td&quot;);
+
+						intro = false;
+					});
+					rtn += row.tag(&quot;tr&quot;);
+				});
+
+				return rtn.tag(&quot;table&quot;, { border: 1 }); //.tag(&quot;div&quot;,{style:&quot;overflow-x:auto&quot;});
+
+			case Object:
+				// { key:val, ... } create table dump of object hash
+
+				var rtn = &quot;&quot;;
+				Each(recs, function (key, val) {
+					if (val) rtn += isArray(val) ? table(val) : (key.tag(&quot;td&quot;) + JSON.stringify(val).tag(&quot;td&quot;)).tag(&quot;tr&quot;);
+				});
+
+				return rtn.tag(&quot;table&quot;);
+
+			default:
+				return recs + &quot;&quot;;
+		}
+	}
+
+	function dump(x) {
+		rtn = &quot;&quot;;
+		for (var n in x) {
+			switch (x[n].constructor) {
+				case Object:
+					rtn += dump(x[n]);break;
+				case Array:
+					rtn += n + &quot;[]&quot;;break;
+				case Function:
+					rtn += n + &quot;()&quot;;break;
+				default:
+					rtn += n;
+			}
+			rtn += &quot;; &quot;;
+		}
+		return rtn;
+	}
+
+	return table(this);
+}, function mailify(tags, def) {
+	var users = [];
+	this.forEach(function (user) {
+		if (user.indexOf(&quot;@&quot;) &gt;= 0) users.push(user);
+	});
+
+	tags = tags || {};
+	tags.subject = tags.subject || &quot;request for information&quot;;
+
+	if (def) return users.length ? &quot;mailto:&quot; + users.join(&quot;;&quot;).tag(&quot;?&quot;, tags) : def;else return users.length ? (users.length + &quot;&quot;).tag(&quot;a&quot;, { href: &quot;mailto:&quot; + users.join(&quot;;&quot;).tag(&quot;?&quot;, tags) }) : &quot;none&quot;;
+}].extend(Array);
+
+[// date prototypes
+function getWeek() {
+	var date = new Date(this.getTime());
+	date.setHours(0, 0, 0, 0);
+	// Thursday in current week decides the year.
+	date.setDate(date.getDate() + 3 - (date.getDay() + 6) % 7);
+	// January 4 is always in week 1.
+	var week1 = new Date(date.getFullYear(), 0, 4);
+	// Adjust to Thursday in week 1 and count number of weeks from date to week1.
+	return 1 + Math.round(((date.getTime() - week1.getTime()) / 86400000 - 3 + (week1.getDay() + 6) % 7) / 7);
+}, function addDays(days) {
+	var d = new Date(this);
+	d.setDate(d.getDate() + days);
+	return d;
+}].extend(Date);
+
+function sharePlugin(req, res) {
+	//&lt; share plugin attribute / license plugin code
+
+	var errors = DEBE.errors,
+	    sql = req.sql,
+	    query = req.query,
+	    attr = req.type,
+	    partner = req.client,
+	    endService = query.endservice + &quot;&quot;,
+	    proxy = query.proxy,
+	    types = {
+		pub: &quot;txt&quot;,
+		users: &quot;json&quot;,
+		md: &quot;txt&quot;,
+		toumd: &quot;txt&quot;,
+		status: &quot;html&quot;,
+		suitors: &quot;txt&quot;,
+		publist: &quot;txt&quot;,
+		tou: &quot;html&quot;,
+		js: &quot;txt&quot;,
+		py: &quot;txt&quot;,
+		me: &quot;txt&quot;,
+		m: &quot;txt&quot;,
+		jade: &quot;txt&quot;
+	};
+
+	sql.query(&quot;SELECT * FROM ??.engines WHERE least(?,1) LIMIT 1&quot;, [req.group, { Name: req.table }], function (err, engs) {
+		if (eng = engs[0]) FLEX.pluginAttribute(sql, attr, partner, endService, proxy, eng, function (attrib) {
+			req.type = types[req.type] || &quot;txt&quot;;
+
+			if (attrib) res(attrib);else switch (attr) {
+				case &quot;js&quot;:
+				case &quot;py&quot;:
+				case &quot;me&quot;:
+				case &quot;m&quot;:
+					res(errors.noPartner);
+					break;
+
+				case &quot;pub&quot;:
+					sql.query(&quot;SELECT * FROM app.releases WHERE ? ORDER BY _Published DESC LIMIT 1&quot;, { _Product: eng.Name + &quot;.&quot; + eng.Type }, function (err, pubs) {
+
+						if (pub = pubs[0]) {
+							res(&quot;Publishing &quot; + eng.Name);
+
+							/*
+       var 
+       	parts = pub.Ver.split(&quot;.&quot;),
+       	ver = pub.Ver = parts.concat(parseInt(parts.pop()) + 1).join(&quot;.&quot;);
+       */
+
+							FLEX.publishPlugin(req, eng.Name, eng.Type, true);
+						} else res(new Error(&quot;no &quot; + eng.Name + &quot; product&quot;));
+					});
+					break;
+
+				default:
+					res(eng[req.type] || errors.noAttribute);
+			}
+		});else res(errors.noEngine);
+	});
+}
+
+function exeAutorun(sql, name, path) {
+
+	Log(&quot;autorun&quot;, path);
+	sql.query(&quot;SELECT * FROM app.files WHERE Name=?&quot;, path.substr(1)).on(&quot;result&quot;, function (file) {
+
+		var fetcher = DEBE.fetcher,
+		    now = new Date(),
+		    startOk = now &gt;= file.PoP_Start || !file.PoP_Start,
+		    endOk = now &lt;= file.PoP_End || !file.PoP_End,
+		    fileOk = startOk &amp;&amp; endOk;
+
+		Log(&quot;autorun&quot;, startOk, endOk);
+
+		if (fileOk) sql.query(&quot;SELECT Run FROM openv.watches WHERE File=?&quot;, path.substr(1)).on(&quot;result&quot;, function (link) {
+			var parts = link.Run.split(&quot;.&quot;),
+			    pluginName = parts[0],
+			    caseName = parts[1],
+			    exePath = &quot;/&quot; + pluginName + &quot;.exe?Name=&quot; + caseName;
+
+			Log(&quot;autorun&quot;, link, exePath);
+			fetcher(exePath, null, function (rtn) {
+				Log(&quot;autorun&quot;, rtn);
+			});
+		});
+	});
+}
+
+function dogAutoruns(path) {
+	DEBE.watchFile(&quot;.&quot; + path, exeAutorun);
+}
+
+//======================= execution tracing
+
+function Trace(msg, sql) {
+	TRACE.trace(msg, sql);
+}
+
+//======================= unit tests
+
+<span id='DEBE-Unit_tests_Use_Cases'>/**
+</span>@class DEBE.Unit_tests_Use_Cases
+*/
+
+switch (process.argv[2]) {//&lt; unit tests
+	case &quot;?&quot;:
+		Log(&quot;unit test with 'node debe [D1 || D2 || ...]'&quot;);
+		break;
+
+	case &quot;D1&quot;:
+<span id='DEBE-Unit_tests_Use_Cases-method-D1'>		/**
+</span>  @method D1
+  */
+		var DEBE = require(&quot;../debe&quot;).config({
+			onFile: {
+				&quot;./uploads/&quot;: function uploads(sql, name, path) {
+					// watch changes to a file				
+
+					sql.getFirst( // get client for registered file
+					&quot;UPLOAD&quot;, &quot;SELECT ID,Client,Added FROM app.files WHERE least(?) LIMIT 1&quot;, { Name: name }, function (file) {
+
+						if (file) {
+							// ingest only registered file
+							var now = new Date(),
+							    exit = new Date(),
+							    client = file.Client,
+							    added = file.Added,
+							    site = DEBE.site,
+							    port = name.tag(&quot;a&quot;, { href: &quot;/files.view&quot; }),
+							    url = site.urls.worker,
+							    metrics = &quot;metrics&quot;.tag(&quot;a&quot;, { href: url + &quot;/airspace.view&quot; }),
+
+							/* [
+       	&quot;quality&quot;.tag(&quot;a&quot;,{href:url+&quot;/airspace.view?options=quality&quot;}),
+       	&quot;clumping&quot;.tag(&quot;a&quot;,{href:url+&quot;/airspace.view?options=clumping&quot;}),
+       	&quot;loitering&quot;.tag(&quot;a&quot;,{href:url+&quot;/airspace.view?options=loitering&quot;}),
+       	&quot;corridors&quot;.tag(&quot;a&quot;,{href:url+&quot;/airspace.view?options=corridors&quot;}),
+       	&quot;patterns&quot;.tag(&quot;a&quot;,{href:url+&quot;/airspace.view?options=patterns&quot;})
+       ].join(&quot;, &quot;), */
+							poc = site.distro.d;
+
+							sql.getFirst( // credit client for upload
+							&quot;UPLOAD&quot;, &quot;SELECT `Group` FROM openv.profiles WHERE ? LIMIT 1&quot;, { Client: client }, function (prof) {
+
+								exit.offsetDays(30);
+
+								if (prof) {
+									var group = prof.Group,
+									    revised = &quot;revised&quot;.tag(&quot;a&quot;, { href: &quot;/files.view?ID=&quot; + file.ID }),
+									    notes = &quot;\nThank you &quot; + client + &quot; for your sample deposit to &quot; + port + &quot; on &quot; + now + &quot;.  If your \nsample passes initial quality assessments, additional &quot; + metrics + &quot; will become available.  Unless\n&quot; + revised + &quot;, these samples will expire on &quot; + exit + &quot;.  Should you wish to remove these quality \nassessments from our worldwide reporting system, please contact &quot; + poc + &quot; for consideration.\n&quot;;
+									sql.query(&quot;UPDATE app.files SET ? WHERE ?&quot;, [{
+										_State_Notes: notes,
+										Added: now,
+										PoP_Expires: exit
+									}, { ID: file.ID }], function (err) {
+										DEBE.ingestFile(sql, path, name, file.ID, function (aoi) {
+											//Trace( `CREDIT ${client}` );
+
+											sql.query(&quot;UPDATE app.profiles SET Credit=Credit+? WHERE Client=?&quot;, [aoi.snr, client]);
+
+											if (false) // put upload into LTS - move this to file watchDog
+												CP.exec(&quot;zip &quot; + path + &quot;.zip &quot; + path + &quot;; rm &quot; + path + &quot;; touch &quot; + path, function (err) {
+													Trace(&quot;PURGED &quot; + name);
+												});
+										});
+									});
+								}
+
+								sql.release();
+							});
+						}
+					});
+				}
+
+				/*
+    &quot;./public/js/&quot;: function (sql,name,ev) {
+    	// run FLEX.publish on the engine
+    	sql.release();
+    },
+    	&quot;./public/py/&quot;: function (sql,name,ev) {
+    	// run FLEX.publish on the engine
+    	sql.release();
+    } */
+
+			}
+		}, function (err) {
+			Trace(err || &quot;Yowzers - this does everything but eat!  An encrypted service, a database, a jade UI for clients,\nusecase-engine plugins, file-upload watchers, and watch dogs that monitor system resources (jobs, files, \nclients, users, system health, etc).&quot;);
+		});
+		break;
+
+	case &quot;D2&quot;:
+<span id='DEBE-Unit_tests_Use_Cases-method-D1'>		/**
+</span>  @method D1
+  */
+		var DEBE = require(&quot;../debe&quot;).config({
+			riddles: 10,
+			&quot;byTable.&quot;: {
+				wfs: function wfs(req, res) {
+					res(&quot;here i go again&quot;);
+
+					TOTEM.fetchers.http(ENV.WFS_TEST, function (data) {
+						console.log(data);
+					});
+				}
+			}
+		}, function (err) {
+			Trace(&quot;This bad boy in an encrypted service with a database and has an /wfs endpoint&quot;);
+		});
+		break;
+
+	case &quot;D3&quot;:
+<span id='DEBE-Unit_tests_Use_Cases-method-D3'>		/**
+</span>  @method D3
+  */
+
+		var DEBE = require(&quot;../debe&quot;).config({}, function (err) {
+			Trace(err || &quot;Stateful network flow manger started&quot;);
+		});
+		break;
+
+	case &quot;?&quot;:
+		Trace(&quot;unit test D1-D3 available&quot;);
+}
+
+// UNCLASSIFIED</pre>
+</body>
+</html>
